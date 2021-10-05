@@ -107,10 +107,7 @@ class gemini_generator(object):
                 columns=['_'.join([asset,str(horizon)]) for asset in self.asset_list for horizon in range(self.num_of_horizons)])
 
     
-    def conditional_multivariate_normal_partial_time(self,
-            conditional_horizon_start,
-            conditional_horizon_end,
-            conditional_scen_df):
+    def conditional_multivariate_normal_partial_time(self,conditional_horizon_start,conditional_horizon_end,conditional_scen_df):
         """
         Compute mean and the squre root of the covariance matrix
         of a multivariate Gaussian distribution conditioned on a set of

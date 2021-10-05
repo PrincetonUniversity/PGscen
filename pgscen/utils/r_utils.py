@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from scipy.stats import norm
+from statsmodels.distributions.empirical_distribution import ECDF
 from rpy2.robjects.packages import importr
 import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
@@ -305,8 +306,11 @@ def gaussianize(df,gpd=True):
     for col in df.columns:
         data = np.ascontiguousarray(df[col].values)
 
-        dist_dict[col] = fit_dist(data,gpd)
-        unif_df[col] = pdist(dist_dict[col],data)
+        # dist_dict[col] = fit_dist(data,gpd)
+        # unif_df[col] = pdist(dist_dict[col],data)
+
+        dist_dict[col] = stats.ecdf(data)
+        unif_df[col] = np.array(dist_dict[col](robjects.FloatVector(data)))
 
     unif_df.clip(lower=1e-5,upper=0.99999,inplace=True)
     gauss_df = unif_df.apply(norm.ppf)
