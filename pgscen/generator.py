@@ -49,7 +49,40 @@ class gemini_generator(object):
             arr = np.reshape(df[asset].values,(1,self.num_of_horizons))
             self.forecast_dict[asset] = pd.DataFrame(data=arr,columns=self.scen_timesteps)
 
-    def fit_conditional_gpd(self,r=0.05,positive_actual=False):
+    # def fit_conditional_gpd(self,r=0.1,positive_actual=False,minimum_sample=200):
+    #     """
+    #     Fit conditional GPD
+    #     """
+    #     self.conditional_gpd_dict = {}
+    #     for asset in self.asset_list:
+    #         asset_df = self.deviation_dict[asset]
+
+    #         if positive_actual:
+    #             asset_df = asset_df[asset_df['Actual']>0.]
+
+    #         fcst_min = asset_df['Forecast'].min()
+    #         capacity = asset_df['Forecast'].max()
+
+    #         for horizon in range(self.num_of_horizons):
+    #             fcst = self.forecast_dict[asset].values.ravel()[horizon]
+    #             # if fcst < fcst_min or fcst > capacity:
+    #             #     warnings.warn(f'forecast not in the range of historical forecasts, unable to fit a conditional GPD',RuntimeWarning)
+
+    #             lower = max(fcst_min,fcst-r*capacity)
+    #             upper = min(capacity,fcst+r*capacity)
+    #             data = np.ascontiguousarray(asset_df[(asset_df['Forecast']>=lower) & (asset_df['Forecast']<=upper)]['Deviation'].values)
+
+    #             # if len(data) < 100:
+    #             #     warnings.warn(f'using {len(data)} data points to fit GPD for asset {asset} horizon {horizon}, result can be unreliable',RuntimeWarning)
+
+    #             # If not enough samples, take more samples around forecast
+    #             if len(data) < minimum_sample:
+    #                 idx = (asset_df.sort_values('Forecast')-fcst).abs().sort_values('Forecast').index[0:minimum_sample]
+    #                 data = np.ascontiguousarray(asset_df.loc[idx].values)
+
+    #             self.conditional_gpd_dict['_'.join([asset,str(horizon)])] = fit_dist(data)    
+
+    def fit_conditional_gpd(self,minimum_sample=200,positive_actual=False):
         """
         Fit conditional GPD
         """
@@ -65,17 +98,11 @@ class gemini_generator(object):
 
             for horizon in range(self.num_of_horizons):
                 fcst = self.forecast_dict[asset].values.ravel()[horizon]
-                if fcst < fcst_min or fcst > capacity:
-                    warnings.warn(f'forecast not in the range of historical forecasts, unable to fit a conditional GPD',RuntimeWarning)
 
-                lower = max(fcst_min,fcst-r*capacity)
-                upper = min(capacity,fcst+r*capacity)
-                data = asset_df[(asset_df['Forecast']>=lower) & (asset_df['Forecast']<=upper)]['Deviation'].values
+                idx = (asset_df['Forecast']-fcst).abs().sort_values().index[0:minimum_sample]
+                data = np.ascontiguousarray(asset_df.loc[idx,'Deviation'].values)
 
-                if len(data) < 100:
-                    warnings.warn(f'using {len(data)} data points to fit GPD for asset {asset} horizon {horizon}, result can be unreliable',RuntimeWarning)
-                
-                self.conditional_gpd_dict['_'.join([asset,str(horizon)])] = fit_dist(data)    
+                self.conditional_gpd_dict['_'.join([asset,str(horizon)])] = fit_dist(data) 
         
     """
     Generate Gaussian scenarios
