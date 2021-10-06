@@ -32,36 +32,71 @@ def point_mass(data,masspt,threshold=0.05):
     """
     return (data==masspt).sum()/len(data)>=threshold
 
-def gpd_tail(data,lower=0.3,upper=0.7,threshold=1):
-    """
-    Determine if given dataset has lower, upper, both or no tails.
+# def gpd_tail(data,lower=0.3,upper=0.7,threshold=1):
+#     """
+#     Determine if given dataset has lower, upper, both or no tails.
 
-    :param data: input data
-    :type data: 1d numpy array
-    :param lower: data samples below this percentile are considered lower tail 
-    :type lower: float
-    :param upper: data samples above this percentile are considered upper tail 
-    :type upper: float
-    :param threshold: the range of a tail need to be > threshold*std to be considered as a heavy tail 
-    :type threshold: float
+#     :param data: input data
+#     :type data: 1d numpy array
+#     :param lower: data samples below this percentile are considered lower tail 
+#     :type lower: float
+#     :param upper: data samples above this percentile are considered upper tail 
+#     :type upper: float
+#     :param threshold: the range of a tail need to be > threshold*std to be considered as a heavy tail 
+#     :type threshold: float
 
-    :return: str, ``two``, ``lower``,``upper`` or ``none``
-    """
+#     :return: str, ``two``, ``lower``,``upper`` or ``none``
+#     """
 
-    # Do not fit GPD if size of sample < 80
-    if len(data) < 80:
+#     # Do not fit GPD if size of sample < 80
+#     if len(data) < 80:
+#         return 'none'
+
+#     # Check quantiles
+#     ql,qu = np.quantile(data,[lower,upper])
+#     std = np.std(data)
+    
+#     ll,uu = False,False
+#     if ql-np.min(data) > threshold*std:
+#         ll = True
+#     if np.max(data)-qu > threshold*std:
+#         uu = True
+    
+#     if ll and uu:
+#         return 'two'
+#     elif ll:
+#         return 'lower'
+#     elif uu:
+#         return 'upper'
+#     else:
+#         return 'none'
+
+
+def gpd_tail(data,lower=0.15,upper=0.85,bins=3,r=0.1):
+
+    # Do not try to fit GPD if sample size < 100
+    if len(data) < 100:
         return 'none'
 
-    # Check quantiles
-    ql,qu = np.quantile(data,[lower,upper])
-    std = np.std(data)
-    
-    ll,uu = False,False
-    if ql-np.min(data) > threshold*std:
-        ll = True
-    if np.max(data)-qu > threshold*std:
-        uu = True
-    
+    # Get ``lower`` and ``upper`` parts of input data
+    sdata = sorted(data)
+    n = len(data)
+    nlow = int(lower*n)
+    nup = int(upper*n)
+    lower_df = pd.DataFrame({'lower':sdata[:nlow]})
+    upper_df = pd.DataFrame({'upper':sdata[nup:]})
+
+    lower_counts = lower_df.groupby(pd.cut(lower_df['lower'],bins)).count().sort_index().values.ravel()
+    upper_counts = upper_df.groupby(pd.cut(upper_df['upper'],bins)).count().sort_index().values.ravel()
+
+    # print('lower_counts',lower_counts)
+    # print('upper_counts',upper_counts)
+
+    # Check if numbers of data points in the bins are (almost) increasing/decreasing
+    r += 1.
+    ll = ((lower_counts[:-1]-r*lower_counts[1:])<=0).all()
+    uu = ((r*upper_counts[:-1]-upper_counts[1:])>=0).all()
+
     if ll and uu:
         return 'two'
     elif ll:
@@ -70,7 +105,6 @@ def gpd_tail(data,lower=0.3,upper=0.7,threshold=1):
         return 'upper'
     else:
         return 'none'
-
 
 # """
 # Remove trend by fitting natural splines
@@ -232,7 +266,7 @@ def fit_dist(data,gpd=True):
         # Otherwise use emperical CDF
 
         # Determine tails
-        tail = gpd_tail(data,lower=0.3,upper=0.7,threshold=0.5)
+        tail = gpd_tail(data)
             
         # print(tail)
         if tail == 'none':
