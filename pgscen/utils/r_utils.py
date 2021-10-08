@@ -72,7 +72,7 @@ def point_mass(data,masspt,threshold=0.05):
 #         return 'none'
 
 
-def gpd_tail(data,lower=0.15,upper=0.85,bins=3,r=0.1):
+def gpd_tail(data,lower=0.15,upper=0.85,bins=3,bin_threshold=3,range_threshold=0.05):
 
     # Do not try to fit GPD if sample size < 100
     if len(data) < 100:
@@ -80,23 +80,43 @@ def gpd_tail(data,lower=0.15,upper=0.85,bins=3,r=0.1):
 
     # Get ``lower`` and ``upper`` parts of input data
     sdata = sorted(data)
+    drange = sdata[-1]-sdata[0]
+
     n = len(data)
     nlow = int(lower*n)
     nup = int(upper*n)
-    lower_df = pd.DataFrame({'lower':sdata[:nlow]})
-    upper_df = pd.DataFrame({'upper':sdata[nup:]})
-
-    lower_counts = lower_df.groupby(pd.cut(lower_df['lower'],bins)).count().sort_index().values.ravel()
-    upper_counts = upper_df.groupby(pd.cut(upper_df['upper'],bins)).count().sort_index().values.ravel()
-
-    # print('lower_counts',lower_counts)
-    # print('upper_counts',upper_counts)
-
-    # Check if numbers of data points in the bins are (almost) increasing/decreasing
-    r += 1.
-    ll = ((lower_counts[:-1]-r*lower_counts[1:])<=0).all()
-    uu = ((r*upper_counts[:-1]-upper_counts[1:])>=0).all()
-
+    
+    # Find range of lower and upper tails
+    lower_range = np.ptp(sdata[:nlow])
+    upper_range = np.ptp(sdata[nup:])
+    
+    
+    if lower_range < range_threshold*drange:
+        ll = False
+    else:
+        lower_df = pd.DataFrame({'lower':sdata[:nlow]})
+        lower_counts = lower_df.groupby(pd.cut(lower_df['lower'],bins)).count().sort_index().values.ravel()
+#         print(lower_counts)
+        
+        ll = True
+        for i in range(len(lower_counts)-1):
+            if lower_counts[i]>lower_counts[i+1]+bin_threshold:
+                ll = False
+                break
+        
+    if upper_range < range_threshold*drange:
+        uu = False
+    else:
+        upper_df = pd.DataFrame({'upper':sdata[nup:]})
+        upper_counts = upper_df.groupby(pd.cut(upper_df['upper'],bins)).count().sort_index().values.ravel()
+        
+#         print(upper_counts)
+        uu = True
+        for i in range(len(upper_counts)-1):
+            if upper_counts[i+1]>upper_counts[i]+bin_threshold:
+                uu = False
+                break
+                
     if ll and uu:
         return 'two'
     elif ll:

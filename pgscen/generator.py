@@ -102,7 +102,10 @@ class gemini_generator(object):
                 idx = (asset_df['Forecast']-fcst).abs().sort_values().index[0:minimum_sample]
                 data = np.ascontiguousarray(asset_df.loc[idx,'Deviation'].values)
 
-                self.conditional_gpd_dict['_'.join([asset,str(horizon)])] = fit_dist(data) 
+                try:
+                    self.conditional_gpd_dict['_'.join([asset,str(horizon)])] = fit_dist(data) 
+                except:
+                    raise RuntimeError(f'Debugging: unable to fit gpd for {asset} {horizon}')
         
     """
     Generate Gaussian scenarios

@@ -65,7 +65,7 @@ class solar_engine(object):
         # Set the distance between asset at the same location to be a small positive constanst
         # to prevent glasso from not converging
         if (rho>0).any():
-            rho[rho==0] = 1e-1*np.min(rho[rho>0])
+            rho[rho==0] = 1e-2*np.min(rho[rho>0])
         else:
             rho += 1e-4
 
@@ -280,7 +280,6 @@ class solar_engine(object):
 
             gemini['gemini_generator'] = gemini_gen
 
-        
         # Get forecast and collect scenarios for generator with all horizons
         self.solar_generator.get_forecast(forecast_df)
         
@@ -316,7 +315,7 @@ class solar_engine(object):
 
         # Create solar model
         solar_asset_rho = solar_engine.get_solar_reg_param(solar_site_list,solar_meta_df)
-        solar_horizon_rho = 1e-2
+        solar_horizon_rho = 5e-2
         solar_md = solar_engine._fit_gemini_model(solar_site_list,solar_scenario_start_time,\
             self.hist_actual_df,self.hist_forecast_df,self.forecast_resolution_in_minute,\
             solar_num_of_horizons,solar_forecast_lead_time_in_hour,solar_hist_deviation_index,\
@@ -593,7 +592,7 @@ def create_day_ahead_load_scenario(nscen,scenario_start_time,load_zone_list,load
     md.compute_deviation()
     md.compute_deviation_with_horizons()
     md.gaussianize_hist_deviation()
-    md.fit(1e-2,1e-2)
+    md.fit(5e-2,5e-2)
 
     gen = gemini_generator(md)
     gen.get_forecast(load_future_forecast_df)
@@ -623,7 +622,7 @@ def create_day_ahead_wind_scenario(nscen,scenario_start_time,wind_meta_df,wind_s
     dist = asset_euclidean_distance(wind_site_list,wind_meta_df,\
         name_col='Facility.Name',lon_col='longi',lat_col='lati')
     asset_rho = dist/(10*np.max(dist))
-    horizon_rho = 1e-2
+    horizon_rho = 5e-2
     md.fit(asset_rho,horizon_rho)
 
     gen = gemini_generator(md)
