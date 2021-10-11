@@ -1,19 +1,30 @@
-name: powscen
+name: pgscen
 channels:
   - conda-forge 
 dependencies:
   - python=3.8
-  - r-essentials=4.0
-  - r-base=4.0
-  - rpy2
+  - pip
   - numpy
   - scipy
   - pandas
-  - statsmodels
   - matplotlib
+  - statsmodels
   - jupyterlab
   - openpyxl
   - h5py
-  - pip
+  - rpy2
+  - R
+  - r-essentials=4.0
+  - r-base=4.0
+  - r-glasso
+  - r-qgraph
+  - r-robustbase
+  - r-rgl
+  - r-quantreg
+  - r-mvtnorm
+  - r-quadprog
+  - r-scatterplot3d
+  - r-tseries
+  - r-plot3d
   - pip:
     - astral
