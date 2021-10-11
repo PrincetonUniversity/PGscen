@@ -2,6 +2,7 @@ import pandas as pd
 from astral import LocationInfo
 from astral.sun import sun
 from datetime import datetime
+from operator import itemgetter
 
 def overlap(a,b):
     """
@@ -41,82 +42,73 @@ def get_activate_assets(sun_type,meta_df,time_period_start,time_period_in_minute
             asset_list.append(site)
 
     return sorted(asset_list)
-    
-def get_similar_solar_dates(loc,dt,start,end,time_range_in_minutes=15):
-    """
-    Find dates during when a give location's sunrise and sunset times 
-    are within a time range of a datetime.
 
-    :param loc: location in question
-    :type loc: astral.LocationInfo
-    :param dt: datetime in question
-    :type dt: pandas Timestamp
-    :param start: starting date of interest
-    :type start: pandas Timestamp
-    :param end: end date of interest
-    :type end: pandas Timestamp
-    :param range_in_seconds: time range in second
-    :type range_in_seconds: int
 
-    """
-    s = sun(loc.observer,date=dt)
-    current_sunrise_time = datetime.combine(datetime.min,pd.to_datetime(s['sunrise']).tz_convert('US/Central').time())
-    current_sunset_time = datetime.combine(datetime.min,pd.to_datetime(s['sunset']).tz_convert('US/Central').time())
+def get_solar_hist_dates(date, meta_df, hist_start, hist_end,
+                         time_range_in_minutes=15):
 
-    sunrise_dates,sunset_dates = [],[]
-
-    for date in pd.date_range(start=start,end=end,freq='D',tz='utc'):
-        s = sun(loc.observer,date=date)    
-        sunrise_time = datetime.combine(datetime.min,pd.to_datetime(s['sunrise']).tz_convert('US/Central').time())
-        sunset_time = datetime.combine(datetime.min,pd.to_datetime(s['sunset']).tz_convert('US/Central').time())
-            
-        # Sunrise
-        if sunrise_time<=current_sunrise_time:
-            diff = current_sunrise_time-sunrise_time
-        else:
-            diff = sunrise_time-current_sunrise_time
-            
-        if diff<=pd.Timedelta(time_range_in_minutes,unit='min'):
-            sunrise_dates.append(date)
-
-        # Sunset
-        if sunset_time<=current_sunset_time:
-            diff = current_sunset_time-sunset_time
-        else:
-            diff = sunset_time-current_sunset_time
-            
-        if diff<=pd.Timedelta(time_range_in_minutes,unit='min'):
-            sunset_dates.append(date)
-
-    return sunrise_dates,sunset_dates
-
-def get_solar_hist_dates(date,meta_df,hist_start,hist_end,time_range_in_minutes=15):
-
-    hist_dates = pd.date_range(start=hist_start,end=hist_end,freq='D',tz='utc')
+    hist_dates = pd.date_range(start=hist_start, end=hist_end,
+                               freq='D', tz='utc')
     hist_years = hist_dates.year.unique()
     hist_dates = set(hist_dates)
 
     # Take 60 days before and after
     near_dates = set()
     for year in hist_years:
-        year_date = datetime(year,date.month,date.day)
-        near_dates = near_dates.union(set(pd.date_range(start=year_date-pd.Timedelta(60,unit='D'),periods=121,freq='D',tz='utc')))
+        year_date = datetime(year,date.month, date.day)
+        near_dates = near_dates.union(
+            set(pd.date_range(start=year_date - pd.Timedelta(60, unit='D'),
+                              periods=121, freq='D', tz='utc'))
+            )
     hist_dates = hist_dates.intersection(near_dates)
 
-    # Eliminate dates when sunrise and sunset times are different
-    for _,row in meta_df.iterrows():
-        site = row['site_ids']
-        lon = row['longitude']
-        lat = row['latitude']
+    asset_locs = {site: LocationInfo(site, 'Texas', 'USA', lat, lon).observer
+                  for site, lat, lon in zip(meta_df.index,
+                                            meta_df.latitude,
+                                            meta_df.longitude)}
 
-        loc = LocationInfo(site,'Texas','USA',lat,lon)
-        sunrise_dates,sunset_dates = get_similar_solar_dates(loc,date,hist_start,hist_end,time_range_in_minutes=time_range_in_minutes)
+    asset_suns = {site: sun(loc, date=date)
+                  for site, loc in asset_locs.items()}
 
-        hist_dates = hist_dates.intersection(set(sunrise_dates).intersection(set(sunset_dates)))
+    for site in asset_suns:
+        for sun_time in ['sunrise', 'sunset']:
+            asset_suns[site][sun_time] = datetime.combine(
+                datetime.min,
+                pd.to_datetime(asset_suns[site][sun_time]).tz_convert(
+                    'US/Central').time()
+                )
 
-    return hist_dates
+    cur_rises = pd.Series({site: s['sunrise']
+                           for site, s in asset_suns.items()})
+    cur_sets = pd.Series({site: s['sunset'] for site, s in asset_suns.items()})
 
-    
+    hist_suns = {site: {hist_date: sun(loc, date=hist_date)
+                        for hist_date in hist_dates}
+                 for site, loc in asset_locs.items()}
+
+    for site in asset_suns:
+        for hist_date in hist_dates:
+            for sun_time in ['sunrise', 'sunset']:
+                hist_suns[site][hist_date][sun_time] = datetime.combine(
+                    datetime.min,
+                    pd.to_datetime(
+                        hist_suns[site][hist_date][sun_time]).tz_convert(
+                        'US/Central'
+                        ).time()
+                    )
+
+    sun_df = pd.DataFrame(hist_suns)
+    sunrise_df = sun_df.applymap(itemgetter('sunrise'))
+    sunset_df = sun_df.applymap(itemgetter('sunset'))
+
+    max_diff = pd.Timedelta(time_range_in_minutes, unit='min')
+    rise_diffs = (sunrise_df - cur_rises).abs() <= max_diff
+    set_diffs = (sunset_df - cur_sets).abs() <= max_diff
+    hist_stats = (rise_diffs & set_diffs).all(axis=1)
+
+    return {hist_time
+            for hist_time, hist_stat in hist_stats.iteritems() if hist_stat}
+
 
 # def get_hist_dates(scen_start_time,start,end,meta_df,sun='both',range_in_seconds=900):
 #     """
