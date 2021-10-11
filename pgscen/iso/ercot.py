@@ -649,7 +649,7 @@ def create_day_ahead_solar_scenario(nscen,scenario_start_datetime,solar_meta_df,
     se.get_model_params()
     se.fit_solar_model()
     se.create_solar_scenario(nscen,solar_future_forecast_df)
-    se.write_to_csv(output_dir,solar_future_actual_df,forecast=True)
+    se.write_to_csv(output_dir,solar_actual_df=solar_future_actual_df,forecast=True)
 
     if return_engine:
         return se
