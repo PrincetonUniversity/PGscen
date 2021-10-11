@@ -1,15 +1,17 @@
 from pgscen.utils.solar_utils import *
 from pgscen.utils.r_utils import gaussianize,gemini
-from pgscen.model import gemini_model
-from pgscen.generator import gemini_generator
 from collections import OrderedDict
 import numpy as np
 
+from ..engine import SolarGeminiEngine
+
+
 class solar_engine(object):
+    """defunct, to be replaced with pgscen.engine.SolarGeminiEngine"""
 
     def __init__(self,meta_df,scenario_start_time,asset_list,actual_df,forecast_df,
         forecast_resolution_in_minute=60,num_of_horizons=24,forecast_lead_time_in_hour=12):
-        
+
         self.meta_df = meta_df.sort_values('site_ids')
         self.scenario_start_time = scenario_start_time
         self.asset_list = asset_list
@@ -183,7 +185,7 @@ class solar_engine(object):
     def _fit_gemini_model(asset_list,scenario_start_time,hist_actual_df,hist_forecast_df,
             forecast_resolution_in_minute,num_of_horizons,forecast_lead_time_in_hour,
             hist_deviation_index,asset_rho,horizon_rho):
-        
+
         gemini_md = gemini_model(len(asset_list),asset_list,scenario_start_time,hist_actual_df,\
             hist_forecast_df,forecast_resolution_in_minute=forecast_resolution_in_minute,\
             num_of_horizons=num_of_horizons,forecast_lead_time_in_hour=forecast_lead_time_in_hour)
@@ -660,164 +662,14 @@ def create_day_ahead_load_solar_joint_scenario(nscen,scenario_start_datetime,loa
         solar_future_forecast_df,load_future_actual_df=None,solar_future_actual_df=None,
         output_dir=None,return_engine=False):
 
-    se = solar_engine(solar_meta_df,scenario_start_datetime,solar_site_list,
-        solar_hist_actual_df,solar_hist_forecast_df)
-    se.get_model_params()
-    se.fit_load_solar_joint_model(load_zone_list,load_hist_actual_df,load_hist_forecast_df)
+    se = SolarGeminiEngine(solar_hist_actual_df, solar_hist_forecast_df,
+                           scenario_start_datetime, solar_meta_df)
+
+    se.fit_load_solar_joint_model(load_hist_actual_df, load_hist_forecast_df)
     se.create_load_solar_joint_scenario(nscen,load_future_forecast_df,solar_future_forecast_df)
-    se.write_to_csv(output_dir,load_actual_df=load_future_actual_df,solar_actual_df=solar_future_actual_df,forecast=True)
+    se.write_to_csv(output_dir,
+                    {'load': load_future_actual_df, 'solar': solar_future_actual_df},
+                    write_forecasts=True)
 
     if return_engine:
         return se
-
-# def create_day_ahead_load_scenario(load_deviation_df,load_forecast_df,load_asset_list,scenario_start_datetime,
-#         nscen,gpd=True,load_actual_df=None,output_dir=None,return_model=False,return_generator=False):
-    
-#     """
-#     Create day-ahead load scenarios
-
-#     :param load_deviation_df: historical load deviations 
-#     :type load_deviation_df: pandas DataFrame
-    
-#                              Example:
-
-#                               |-----------------------------------------------------------------------|
-#                               |                     | Coast_0 | Coast_1 | ... | East_0 | East_1 | ... |
-#                               |-----------------------------------------------------------------------|
-#                               | 2018-01-01 06:00:00 |         |         |     |        |        |     |
-#                               |-----------------------------------------------------------------------|
-                                                              
-#     :param load_forecast_df: load forecast
-#     :type load_forecast_df: pandas DataFrame
-#     :param load_asset_list: list of load asset names
-#     :type load_asset_list: list of str
-#     :param scenario_start_datetime: scenario starting time
-#     :type scenario_start_datetime: pandas Timestamp
-#     :param nscen: number of scenarios to be created
-#     :type nscen: int 
-#     :param gpd: whether fit GPD
-#     :type gpd: boolean
-#     :param load_actual_df: load actual, not output actual if None, 
-#                            defaults to None
-#     :type load_actual_df: pandas DataFrame or None
-#     :param output_dir: directory to output scenario CSV files
-#     :type output_dir: str or file path
-#     :param return_model: whether return model object
-#     :type return_model: boolean
-#     :param return_generator: whether return generator object
-#     :type return_generator: boolean
-
-#     :return:
-#     """
-
-#     # Fit a gemini model
-#     forecast_issue_time = str(pd.to_datetime(scenario_start_datetime)-pd.Timedelta(12,unit='H'))
-#     num_of_assets = len(load_asset_list)
-#     lag_start = 0
-#     lag_end = 23
-
-#     md = gemini_model(num_of_assets,load_asset_list,lag_start,lag_end,scenario_start_datetime)
-
-#     # Choose historical data and compute Gaussian copula
-#     # md.hist_deviation_df = load_deviation_df[load_deviation_df.index<md.scen_start_time]
-#     md.hist_deviation_df = load_deviation_df
-#     md.gaussianize_hist(gpd=gpd)
-#     md.fit(0.05,0.05)
-
-#     # Create scenarios
-#     gen = gemini_generator(md)
-#     gen.generate_gauss_scenario(nscen)
-#     gen.degaussianize()
-#     gen.add_forecast(forecast_issue_time,load_forecast_df)
-
-#     if output_dir is not None:
-#         gen.write_to_csv('load',output_dir,actual_df=load_actual_df,forecast_df=gen.forecast_df)
-
-#     if return_model and return_generator:
-#         return md,gen
-#     elif return_model:
-#         return md,gen.scen_df
-#     else:
-#         return gen.scen_df
-
-# def create_day_ahead_solar_scenario(solar_deviation_df,solar_forecast_df,solar_actual_df,
-#         solar_asset_list,solar_meta_df,scenario_start_datetime,nscen,output_dir=None,return_engine=False):
-        
-#     # Create a solar engine, determine parameters
-#     lag_start,lag_end = 0,23
-#     se = solar_engine(solar_meta_df,scenario_start_datetime,lag_start,lag_end)
-
-#     # Fit load, solar and joint models
-#     se.fit_solar_model(solar_deviation_df)
-
-#     # Create scenarios
-#     forecast_issue_time = scenario_start_datetime-pd.Timedelta(12,unit='H')
-#     se.create_solar_scenario(nscen,forecast_issue_time,solar_forecast_df)
-
-#     # Write CSV files
-#     se.write_to_csv(output_dir,solar_actual_df)
-
-#     if return_engine:
-#         return se
-
-# def create_day_ahead_wind_scenario(wind_deviation_df,wind_forecast_df,wind_asset_list,wind_meta_df,
-#         scenario_start_datetime,nscen,wind_actual_df=None,output_dir=None,return_model=False,return_generator=False):
-
-#     # Fit a gemini model
-#     forecast_issue_time = str(pd.to_datetime(scenario_start_datetime)-pd.Timedelta(12,unit='H'))
-#     num_of_assets = len(wind_asset_list)
-#     lag_start = 0
-#     lag_end = 23
-
-#     md = gemini_model(num_of_assets,wind_asset_list,lag_start,lag_end,scenario_start_datetime)
-
-#     # Choose historical data and compute Gaussian copula
-#     md.hist_deviation_df = wind_deviation_df[wind_deviation_df.index<md.scen_start_time]
-#     md.gaussianize_hist()
-
-#     coords = [coord for coord in zip(wind_meta_df['longi'].values,wind_meta_df['lati'].values)]
-#     dist = md.asset_distance(coords)
-#     dist /= np.max(dist)*10
-#     md.fit(dist,0.01)
-
-#     # Create scenarios
-#     gen = gemini_generator(md)
-#     gen.generate_gauss_scenario(nscen)
-#     gen.degaussianize()
-#     gen.add_forecast(forecast_issue_time,wind_forecast_df)
-
-#     # Clip scenarios 
-#     capacity = dict(zip(wind_meta_df['Facility.Name'].values,wind_meta_df['Capacity'].values))
-#     gen.clip_capacity(upper_dict=capacity)
-
-#     if output_dir is not None:
-#         gen.write_to_csv('wind',output_dir,actual_df=wind_actual_df,forecast_df=gen.forecast_df)
-
-#     if return_model and return_generator:
-#         return md,gen
-#     elif return_model:
-#         return md,gen.scen_df
-#     else:
-#         return gen.scen_df
-#     pass
-
-
-# def create_day_ahead_load_solar_joint_scenario(solar_deviation_df,solar_forecast_df,solar_actual_df,
-#         solar_asset_list,solar_meta_df,load_deviation_df,load_forecast_df,load_actual_df,load_asset_list,
-#         scenario_start_datetime,nscen,output_dir=None,return_engine=False):
-        
-#     lag_start,lag_end = 0,23
-#     se = solar_engine(solar_meta_df,scenario_start_datetime,lag_start,lag_end)
-
-#     # Fit load, solar and joint models
-#     se.fit_joint_load_solar_model(load_asset_list,load_deviation_df,solar_deviation_df)
-
-#     # Create scenarios
-#     forecast_issue_time = scenario_start_datetime-pd.Timedelta(12,unit='H')
-#     se.create_load_solar_joint_scenario(nscen,forecast_issue_time,load_forecast_df,solar_forecast_df)
-
-#     # Write CSV files
-#     se.write_to_csv(output_dir,solar_actual_df,load_actual_df)
-
-#     if return_engine:
-#         return se

@@ -7,7 +7,7 @@ from abc import ABC
 from datetime import datetime
 
 from astral import LocationInfo
-from .model_new import get_asset_list, GeminiModel, GeminiError
+from .model import get_asset_list, GeminiModel, GeminiError
 from .utils.solar_utils import sun, overlap, get_solar_hist_dates
 
 
