@@ -40,14 +40,14 @@ class gemini_model(object):
         """
         Put actual, forecast and deviation into one pandas DataFrame
         """
-        df = self.hist_actual_df.merge(self.hist_forecast_df,how='inner',left_on='Time',\
-            right_on='Forecast_time',suffixes=('_actual','_forecast'))
+        df = self.hist_actual_df.reset_index().merge(self.hist_forecast_df,how='inner',left_on='Time',\
+            right_on='Forecast_time',suffixes=('_actual','_forecast')).set_index('Time')
 
         self.deviation_dict = {}
         for asset in self.asset_list:
             act = df[asset+'_actual']
             fcst = df[asset+'_forecast']
-            self.deviation_dict[asset] = pd.DataFrame({'Actual':act,'Forecast':fcst,'Deviation':act-fcst})
+            self.deviation_dict[asset] = pd.DataFrame({'Actual':act,'Forecast':fcst,'Deviation':act-fcst},index=df.index)
 
     def compute_deviation_with_horizons(self):
         """

@@ -82,7 +82,7 @@ class gemini_generator(object):
 
     #             self.conditional_gpd_dict['_'.join([asset,str(horizon)])] = fit_dist(data)    
 
-    def fit_conditional_gpd(self,minimum_sample=200,positive_actual=False):
+    def fit_conditional_gpd(self,bin_width_ratio=0.05,positive_actual=False):
         """
         Fit conditional GPD
         """
@@ -99,8 +99,18 @@ class gemini_generator(object):
             for horizon in range(self.num_of_horizons):
                 fcst = self.forecast_dict[asset].values.ravel()[horizon]
 
-                idx = (asset_df['Forecast']-fcst).abs().sort_values().index[0:minimum_sample]
-                data = np.ascontiguousarray(asset_df.loc[idx,'Deviation'].values)
+                if fcst <= 0.03*capacity:
+                    # Forecast <= 3% of capacity, take 0-5% bin
+                    data = np.ascontiguousarray(asset_df[asset_df['Forecast']<=0.05*capacity]['Deviation'].values)
+                else:
+                    # Otherwise take fcst +/- 5% bin
+                    fcst_min = fcst-bin_width_ratio*capacity
+                    fcst_max = fcst+bin_width_ratio*capacity
+                    selected_df = asset_df[(asset_df['Forecast']>=fcst_min) & (asset_df['Forecast']<=fcst_max)]
+                    data = np.ascontiguousarray(selected_df['Deviation'].values)
+
+                if len(data) < 200:
+                    warnings.warn(f'using {len(data)} data points to fit GPD for asset {asset} horizon {horizon}, result can be unreliable',RuntimeWarning)
 
                 try:
                     self.conditional_gpd_dict['_'.join([asset,str(horizon)])] = fit_dist(data) 
