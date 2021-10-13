@@ -250,7 +250,7 @@ class solar_engine(object):
             gemini_md = gemini['gemini_model']
             gemini_gen = gemini_generator(gemini_md)
             gemini_gen.get_forecast(forecast_df)
-            gemini_gen.fit_conditional_gpd(positive_actual=True)
+            gemini_gen.fit_conditional_gpd(asset_type='solar',positive_actual=True)
             
             if gemini['conditional_model']:
 
@@ -392,7 +392,7 @@ class solar_engine(object):
         # Generate conditional scenario for load
         load_gen = gemini_generator(load_md)
         load_gen.get_forecast(load_forecast_df)
-        load_gen.fit_conditional_gpd()
+        load_gen.fit_conditional_gpd(bin_width_ratio=0.1,asset_type='load',min_sample_size=400)
         print(load_joint_scen_df.shape)
         cond_horizon_start = int((solar_md.scenario_start_time-load_md.scenario_start_time)\
             /pd.Timedelta(self.forecast_resolution_in_minute,unit='min'))
@@ -412,7 +412,7 @@ class solar_engine(object):
         membership = self.meta_df.groupby('Zone')['site_ids'].apply(list).to_dict()
         solar_gen = gemini_generator(solar_md)
         solar_gen.get_forecast(solar_forecast_df)
-        solar_gen.fit_conditional_gpd(positive_actual=True)
+        solar_gen.fit_conditional_gpd(asset_type='solar',positive_actual=True)
         sqrtcov,mu = solar_gen.conditional_multivariate_normal_aggregation(len(solar_zone_list),\
             solar_zone_list,membership,solar_joint_scen_df)
         solar_gen.generate_gauss_scenario(nscen,conditional=True,sqrtcov=sqrtcov,mu=mu)
@@ -505,7 +505,7 @@ class solar_engine(object):
                 
                 solar_gen = gemini_generator(gemini['solar_model'])
                 solar_gen.get_forecast(solar_forecast_df)
-                solar_gen.fit_conditional_gpd(positive_actual=True)
+                solar_gen.fit_conditional_gpd(asset_type='solar',positive_actual=True)
 
                 cond_gen = gemini['conditional_model']['solar_generator']
 
@@ -596,7 +596,7 @@ def create_day_ahead_load_scenario(nscen,scenario_start_time,load_zone_list,load
 
     gen = gemini_generator(md)
     gen.get_forecast(load_future_forecast_df)
-    gen.fit_conditional_gpd()
+    gen.fit_conditional_gpd(bin_width_ratio=0.1,asset_type='load',min_sample_size=400)
     gen.generate_gauss_scenario(nscen)
     gen.degaussianize(conditional=True)
     gen.add_forecast()
@@ -627,10 +627,12 @@ def create_day_ahead_wind_scenario(nscen,scenario_start_time,wind_meta_df,wind_s
 
     gen = gemini_generator(md)
     gen.get_forecast(wind_future_forecast_df)
-    gen.fit_conditional_gpd()
+    gen.fit_conditional_gpd(asset_type='wind')
     gen.generate_gauss_scenario(nscen)
     gen.degaussianize(conditional=True)
     gen.add_forecast()
+    capacity = dict(zip(wind_meta_df['Facility.Name'].values,wind_meta_df['Capacity'].values))
+    gen.clip_capacity(upper_dict=capacity)
     gen.write_to_csv('wind',output_dir,forecast=True,actual_df=wind_future_actual_df)
 
     if return_model and return_generator:
