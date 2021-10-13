@@ -4,8 +4,8 @@ import os
 import pandas as pd
 from pathlib import Path
 import time
-from pgscen.iso.ercot import (create_day_ahead_solar_scenario,
-                              create_day_ahead_load_solar_joint_scenario)
+
+from .engine import GeminiEngine, SolarGeminiEngine
 
 
 parent_parser = argparse.ArgumentParser(add_help=False)
@@ -51,6 +51,20 @@ def load_solar_data(input_dir):
     return solar_site_actual_df, solar_site_forecast_df, solar_meta_df
 
 
+def split_actuals_hist_future(actual_df, scen_start_time):
+    hist_df = actual_df[actual_df.index < scen_start_time]
+    future_df = actual_df[actual_df.index >= scen_start_time]
+
+    return hist_df, future_df
+
+
+def split_forecasts_hist_future(forecast_df, scen_start_time):
+    hist_df = forecast_df[forecast_df.Forecast_time < scen_start_time]
+    future_df = forecast_df[forecast_df.Forecast_time >= scen_start_time]
+
+    return hist_df, future_df
+
+
 def run_solar():
     parser = argparse.ArgumentParser(
         'pgscen-solar', parents=[parent_parser],
@@ -58,11 +72,9 @@ def run_solar():
         )
     args = parser.parse_args()
 
+    start = ' '.join([args.start, "06:00:00"])
     (solar_site_actual_df, solar_site_forecast_df,
      solar_meta_df) = load_solar_data(args.in_dir)
-
-    solar_site_list = solar_site_actual_df.columns.tolist()
-    start = ' '.join([args.start, "06:00:00"])
 
     if args.verbose >= 2:
         t0 = time.time()
@@ -72,24 +84,23 @@ def run_solar():
         if args.verbose >= 1:
             print("Creating scenarios for: {}".format(scenario_start_time))
 
-        # TODO: create utility functions to handle time subsetting
-        solar_site_hist_actual_df = solar_site_actual_df[
-            solar_site_actual_df.index < scenario_start_time]
-        solar_site_hist_forecast_df = solar_site_forecast_df[
-            solar_site_forecast_df['Forecast_time'] < scenario_start_time]
+        (solar_site_actual_hists,
+         solar_site_actual_futures) = split_actuals_hist_future(
+            solar_site_actual_df, scenario_start_time)
+        (solar_site_forecast_hists,
+         solar_site_forecast_futures) = split_forecasts_hist_future(
+            solar_site_forecast_df, scenario_start_time)
 
-        solar_site_future_actual_df = solar_site_actual_df[
-            solar_site_actual_df.index >= scenario_start_time]
-        solar_site_future_forecast_df = solar_site_forecast_df[
-            solar_site_forecast_df['Forecast_time'] >= scenario_start_time]
+        se = SolarGeminiEngine(solar_site_actual_hists,
+                               solar_site_forecast_hists,
+                               scenario_start_time, solar_meta_df)
 
-        se = create_day_ahead_solar_scenario(
-            args.scenario_count, scenario_start_time, solar_meta_df,
-            solar_site_list, solar_site_hist_forecast_df,
-            solar_site_hist_actual_df, solar_site_future_forecast_df,
-            solar_future_actual_df=solar_site_future_actual_df,
-            output_dir=args.out_dir, return_engine=True
-            )
+        se.fit_solar_model()
+        se.create_solar_scenario(args.scenario_count,
+                                 solar_site_forecast_futures)
+
+        se.write_to_csv(args.out_dir, {'solar': solar_site_actual_futures},
+                        write_forecasts=True)
 
     if args.verbose >= 2:
         if args.days == 1:
@@ -120,12 +131,9 @@ def run_load_solar_joint():
         parse_dates=['Issue_time', 'Forecast_time']
         )
 
+    start = ' '.join([args.start, "06:00:00"])
     (solar_site_actual_df, solar_site_forecast_df,
         solar_meta_df) = load_solar_data(args.in_dir)
-
-    load_zone_list = load_zone_actual_df.columns.tolist()
-    solar_site_list = solar_site_actual_df.columns.tolist()
-    start = ' '.join([args.start, "06:00:00"])
 
     if args.verbose >= 2:
         t0 = time.time()
@@ -135,36 +143,33 @@ def run_load_solar_joint():
         if args.verbose >= 1:
             print("Creating scenarios for: {}".format(scenario_start_time))
 
-        load_zone_hist_actual_df = load_zone_actual_df[
-            load_zone_actual_df.index < scenario_start_time]
-        load_zone_hist_forecast_df = load_zone_forecast_df[
-            load_zone_forecast_df['Forecast_time'] < scenario_start_time]
+        (solar_site_actual_hists,
+         solar_site_actual_futures) = split_actuals_hist_future(
+            solar_site_actual_df, scenario_start_time)
+        (solar_site_forecast_hists,
+         solar_site_forecast_futures) = split_forecasts_hist_future(
+            solar_site_forecast_df, scenario_start_time)
 
-        load_zone_future_actual_df = load_zone_actual_df[
-            load_zone_actual_df.index >= scenario_start_time]
-        load_zone_future_forecast_df = load_zone_forecast_df[
-            load_zone_forecast_df['Forecast_time'] >= scenario_start_time]
+        (load_zone_actual_hists,
+         load_zone_actual_futures) = split_actuals_hist_future(
+            load_zone_actual_df, scenario_start_time)
+        (load_zone_forecast_hists,
+         load_zone_forecast_futures) = split_forecasts_hist_future(
+            load_zone_forecast_df, scenario_start_time)
 
-        solar_site_hist_actual_df = solar_site_actual_df[
-            solar_site_actual_df.index < scenario_start_time]
-        solar_site_hist_forecast_df = solar_site_forecast_df[
-            solar_site_forecast_df['Forecast_time'] < scenario_start_time]
+        se = SolarGeminiEngine(solar_site_actual_hists,
+                               solar_site_forecast_hists,
+                               scenario_start_time, solar_meta_df)
 
-        solar_site_future_actual_df = solar_site_actual_df[
-            solar_site_actual_df.index >= scenario_start_time]
-        solar_site_future_forecast_df = solar_site_forecast_df[
-            solar_site_forecast_df['Forecast_time'] >= scenario_start_time]
+        se.fit_load_solar_joint_model(load_zone_actual_hists,
+                                      load_zone_forecast_hists)
+        se.create_load_solar_joint_scenario(args.scenario_count,
+                                            load_zone_forecast_futures,
+                                            solar_site_forecast_futures)
 
-        se = create_day_ahead_load_solar_joint_scenario(
-            args.scenario_count, scenario_start_time, load_zone_list,
-            load_zone_hist_forecast_df, load_zone_hist_actual_df,
-            solar_meta_df, solar_site_list, solar_site_hist_forecast_df,
-            solar_site_hist_actual_df, load_zone_future_forecast_df,
-            solar_site_future_forecast_df,
-            load_future_actual_df=load_zone_future_actual_df,
-            solar_future_actual_df=solar_site_future_actual_df,
-            output_dir=args.out_dir, return_engine=True
-            )
+        se.write_to_csv(args.out_dir, {'load': load_zone_actual_futures,
+                                       'solar': solar_site_actual_futures},
+                        write_forecasts=True)
 
     if args.verbose >= 2:
         if args.days == 1:

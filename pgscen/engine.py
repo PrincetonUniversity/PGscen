@@ -275,7 +275,8 @@ class SolarGeminiEngine(GeminiEngine):
             'day': {'asset_list': self.asset_list,
                     'scenario_start_time': scen_timesteps[day_horizons[0]],
                     'num_of_horizons': len(day_horizons),
-                    'forecast_lead_hours': day_lead_hours}
+                    'forecast_lead_hours': day_lead_hours,
+                    'conditional_model': None}
             }
 
         cond_indx = 0
@@ -304,6 +305,48 @@ class SolarGeminiEngine(GeminiEngine):
 
         self.cond_count = cond_indx
         self.asset_distance_mat = self.asset_distance()
+
+    def fit_solar_model(self, hist_start='2017-01-01',hist_end='2018-12-31'):
+        """Fit solar models with chosen parameters"""
+
+        for mdl in ['day'] + [('cond', i) for i in range(self.cond_count)]:
+            asset_list = self.gemini_dict[mdl]['asset_list']
+            hour = self.gemini_dict[mdl]['scenario_start_time'].hour
+
+            if mdl == 'day':
+                minute_range = 30
+            else:
+                minute_range = 10
+
+            # Determine historical dates
+            hist_dates = get_solar_hist_dates(
+                self.scen_start_time.floor('D'), self.meta_df.loc[asset_list],
+                hist_start, hist_end, time_range_in_minutes=minute_range
+                )
+
+            # Shift hours in the historical date due to utc
+            if hour >= 6:
+                self.gemini_dict[mdl]['hist_deviation_index'] = [
+                    date + pd.Timedelta(hour, unit='H')
+                    for date in hist_dates
+                    ]
+            else:
+                self.gemini_dict[mdl]['hist_deviation_index'] = [
+                    date + pd.Timedelta(24 + hour, unit='H')
+                    for date in hist_dates
+                    ]
+
+            solar_md = GeminiModel(
+                self.gemini_dict[mdl]['scenario_start_time'],
+                self.get_hist_df_dict(asset_list), None,
+                self.gemini_dict[mdl]['hist_deviation_index'],
+                self.forecast_resolution_in_minute,
+                self.gemini_dict[mdl]['num_of_horizons'],
+                self.gemini_dict[mdl]['forecast_lead_hours']
+                )
+
+            solar_md.fit(self.get_solar_reg_param(asset_list), 1e-2)
+            self.gemini_dict[mdl]['gemini_model'] = solar_md
 
     def fit_load_solar_joint_model(self,
                                    load_hist_actual_df, load_hist_forecast_df,
@@ -462,6 +505,56 @@ class SolarGeminiEngine(GeminiEngine):
 
             solar_md.fit(self.get_solar_reg_param(asset_list), 1e-2)
             self.gemini_dict['cond', i]['solar_model'] = solar_md
+
+    def create_solar_scenario(self, nscen, forecast_df):
+        solar_scens = pd.DataFrame(
+            0., index=list(range(nscen)), columns=pd.MultiIndex.from_tuples(
+                [(asset, timestep) for asset in self.asset_list
+                 for timestep in self.scen_timesteps]
+                )
+            )
+
+        for mdl in ['day'] + [('cond', i) for i in range(self.cond_count)]:
+            solar_md = self.gemini_dict[mdl]['gemini_model']
+            solar_md.get_forecast(forecast_df)
+            solar_md.fit_conditional_gpd(positive_actual=True)
+
+            if self.gemini_dict[mdl]['conditional_model']:
+                cond_md = self.gemini_dict[mdl]['conditional_model']
+                cond_solar_md = self.gemini_dict[cond_md]['gemini_model']
+
+                overlap_timesteps = sorted(set(solar_md.scen_timesteps)
+                                           & set(cond_solar_md.scen_timesteps))
+                solar_horizons = [solar_md.scen_timesteps.index(t)
+                                  for t in overlap_timesteps]
+                cond_horizons = [cond_solar_md.scen_timesteps.index(t)
+                                 for t in overlap_timesteps]
+
+                import pdb; pdb.set_trace()
+
+                cond_scen_df = pd.DataFrame({
+                    (asset, slr_hz): cond_solar_md.scen_gauss_df[
+                        (asset, cond_hz)]
+                    for asset in solar_md.asset_list
+                    for cond_hz, slr_hz in zip(cond_horizons, solar_horizons)
+                    })
+
+                sqrt_cov, mu = solar_md.conditional_multivar_normal_partial_time(
+                    solar_horizons[0], solar_horizons[-1], cond_scen_df)
+
+                solar_md.generate_gauss_scenarios(
+                    nscen, sqrt_cov=sqrt_cov, mu=mu,
+                    upper_dict=self.meta_df.AC_capacity_MW
+                    )
+
+            else:
+                solar_md.generate_gauss_scenarios(
+                    nscen, upper_dict=self.meta_df.AC_capacity_MW)
+
+            solar_scens.update(solar_md.scen_df)
+
+        self.scenarios['solar'] = solar_scens
+        self.forecasts['solar'] = self.get_forecast(forecast_df)
 
     def create_load_solar_joint_scenario(self, nscen,
                                          load_forecast_df, solar_forecast_df):
