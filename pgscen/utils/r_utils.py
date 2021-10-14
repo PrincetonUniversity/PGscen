@@ -1,3 +1,4 @@
+import warnings
 import pandas as pd
 import numpy as np
 from scipy.stats import norm
@@ -264,7 +265,7 @@ def qgpd(dist,x):
         return ff(x)
     
 
-def fit_dist(data,gpd=True):
+def fit_dist(data):
     """
     Fit a distribution (GPD or the emperical distribution) function to the give data set
 
@@ -281,27 +282,49 @@ def fit_dist(data,gpd=True):
     if point_mass(data,0.,threshold=0.05):
         data += tiny*(2*np.random.rand(len(data))-1)
 
-    if gpd:
-        # Fit GPDs if possible
-        # Otherwise use emperical CDF
+    # Determine tails
+    tail = gpd_tail(data)
 
-        # Determine tails
-        tail = gpd_tail(data)
-            
-        # print(tail)
-        if tail == 'none':
-            # No tail, fit emperical CDF
-            f = stats.ecdf
-            return f(robjects.FloatVector(data))
-        else:
-            # At least one tail, fit GPD
-            f = Rsafd.fit_gpd
-            return f(robjects.FloatVector(data),tail=tail,plot=False)
-
+    if tail != 'none':
+        try:
+            return Rsafd.fit_gpd(robjects.FloatVector(data),tail=tail,plot=False)
+        except:
+            warnings.warn(f'{tail} tail has been detected, but unable to fit GPD, using ECDF instead',RuntimeWarning)
+            return stats.ecdf(robjects.FloatVector(data))
     else:
-        # Fit Emperical CDF
-        f = stats.ecdf
-        return f(robjects.FloatVector(data))
+        return stats.ecdf(robjects.FloatVector(data))
+
+    # if tail == 'none':
+    #     # No tail, fit emperical CDF
+    #     f = stats.ecdf
+    #     return f(robjects.FloatVector(data))
+    # else:
+    #     # At least one tail, fit GPD
+    #     f = Rsafd.fit_gpd
+    #     return f(robjects.FloatVector(data),tail=tail,plot=False)
+
+
+    # if gpd:
+    #     # Fit GPDs if possible
+    #     # Otherwise use emperical CDF
+
+    #     # Determine tails
+    #     tail = gpd_tail(data)
+            
+    #     # print(tail)
+    #     if tail == 'none':
+    #         # No tail, fit emperical CDF
+    #         f = stats.ecdf
+    #         return f(robjects.FloatVector(data))
+    #     else:
+    #         # At least one tail, fit GPD
+    #         f = Rsafd.fit_gpd
+    #         return f(robjects.FloatVector(data),tail=tail,plot=False)
+
+    # else:
+    #     # Fit Emperical CDF
+    #     f = stats.ecdf
+    #     return f(robjects.FloatVector(data))
 
 def pdist(dist,x):
     """
@@ -344,7 +367,7 @@ def qdist(dist,x):
         raise(RuntimeError('Unrecognized distribution class {}'.format(tuple(dist.rclass))))
     
 
-def gaussianize(df,gpd=True):
+def gaussianize(df):
     """
     Make data to be Gaussian.
 
@@ -359,9 +382,6 @@ def gaussianize(df,gpd=True):
     dist_dict = dict()
     for col in df.columns:
         data = np.ascontiguousarray(df[col].values)
-
-        # dist_dict[col] = fit_dist(data,gpd)
-        # unif_df[col] = pdist(dist_dict[col],data)
 
         dist_dict[col] = stats.ecdf(data)
         unif_df[col] = np.array(dist_dict[col](robjects.FloatVector(data)))
