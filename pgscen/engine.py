@@ -14,8 +14,9 @@ from .utils.solar_utils import sun, overlap, get_solar_hist_dates
 class GeminiEngine(ABC):
 
     def __init__(self, hist_actual_df, hist_forecast_df, scen_start_time,
-                 meta_df=None, forecast_resolution_in_minute=60,
-                 num_of_horizons=24, forecast_lead_time_in_hour=12):
+                 meta_df=None, asset_label=None,
+                 forecast_resolution_in_minute=60, num_of_horizons=24,
+                 forecast_lead_time_in_hour=12):
 
         self.asset_list = get_asset_list(hist_actual_df, hist_forecast_df)
         self.num_of_assets = len(self.asset_list)
@@ -24,11 +25,23 @@ class GeminiEngine(ABC):
         self.hist_forecast_df = hist_forecast_df
         self.scen_start_time = scen_start_time
         self.meta_df = meta_df
+        self.asset_label = asset_label
+        self.model = None
 
         if meta_df is not None:
+            # solar case
             if 'site_ids' in meta_df.columns:
                 self.meta_df = self.meta_df.sort_values('site_ids').set_index(
                     'site_ids', verify_integrity=True)
+
+            # wind case
+            elif 'Facility.Name' in meta_df.columns:
+                self.meta_df = self.meta_df.sort_values(
+                    'Facility.Name').set_index('Facility.Name').rename(
+                        columns={'lati': 'latitude', 'longi': 'longitude'})
+
+            else:
+                raise GeminiError("Unrecognized type of metadata!")
 
         self.forecast_resolution_in_minute = forecast_resolution_in_minute
         self.num_of_horizons = num_of_horizons
@@ -54,8 +67,22 @@ class GeminiEngine(ABC):
         self.forecasts = dict()
         self.scenarios = dict()
 
-    def fit(self):
-        pass
+    def fit(self, asset_rho, horizon_rho):
+        self.model = GeminiModel(self.scen_start_time, self.get_hist_df_dict(),
+                                 None, None,
+                                 self.forecast_resolution_in_minute,
+                                 self.num_of_horizons,
+                                 self.forecast_lead_hours)
+
+        self.model.fit(asset_rho, horizon_rho)
+
+    def create_scenario(self, nscen, forecast_df):
+        self.model.get_forecast(forecast_df)
+        self.model.fit_conditional_gpd()
+        self.model.generate_gauss_scenarios(nscen)
+
+        self.scenarios[self.asset_label] = self.model.scen_df
+        self.forecasts[self.asset_label] = self.get_forecast(forecast_df)
 
     def get_hist_df_dict(self, assets=None):
         if assets is None:
@@ -112,27 +139,13 @@ class GeminiEngine(ABC):
 
         return use_forecasts.unstack()
 
-    def write_to_csv(self, save_dir, actual_dfs,
-                     write_forecasts=True, asset_label=None):
+    def write_to_csv(self, save_dir, actual_dfs, write_forecasts=True):
         if not isinstance(actual_dfs, dict):
-            actual_dfs = {asset_label: actual_dfs}
+            actual_dfs = {self.asset_label: actual_dfs}
 
         for asset_type, forecast in self.forecasts.items():
-            if asset_label is not None:
-                if asset_type is not None:
-                    raise ValueError(
-                        "Cannot specify an asset label, this engine already "
-                        "has labelled asset types {} !".format(
-                            tuple(self.forecasts.keys()))
-                        )
-
-                file_lbl = asset_label
-
-            else:
-                file_lbl = asset_type
-
             scen_date = str(self.scen_start_time.strftime('%Y%m%d'))
-            out_dir = Path(save_dir, scen_date, file_lbl)
+            out_dir = Path(save_dir, scen_date, asset_type)
 
             if not out_dir.exists():
                 os.makedirs(out_dir)
@@ -183,6 +196,7 @@ class GeminiEngine(ABC):
                         ], axis=1)
                     )
 
+                # TODO: round values for more compact storage
                 filename = asset.rstrip().replace(' ', '_') + '.csv'
                 df.to_csv(out_dir / filename, index=False)
 
@@ -194,7 +208,7 @@ class SolarGeminiEngine(GeminiEngine):
                  forecast_resolution_in_minute=60, num_of_horizons=24,
                  forecast_lead_time_in_hour=12):
         super().__init__(solar_hist_actual_df, solar_hist_forecast_df,
-                         scen_start_time, solar_meta_df,
+                         scen_start_time, solar_meta_df, 'solar',
                          forecast_resolution_in_minute, num_of_horizons,
                          forecast_lead_time_in_hour)
 
@@ -529,8 +543,6 @@ class SolarGeminiEngine(GeminiEngine):
                                   for t in overlap_timesteps]
                 cond_horizons = [cond_solar_md.scen_timesteps.index(t)
                                  for t in overlap_timesteps]
-
-                import pdb; pdb.set_trace()
 
                 cond_scen_df = pd.DataFrame({
                     (asset, slr_hz): cond_solar_md.scen_gauss_df[

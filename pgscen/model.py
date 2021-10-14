@@ -111,8 +111,10 @@ class GeminiModel(object):
                                      columns=self.hist_dev_df.columns)
                         )
 
-            self.hist_dev_df = self.hist_dev_df[
-                self.hist_dev_df.index.isin(dev_index)]
+            if dev_index is not None:
+                self.hist_dev_df = self.hist_dev_df[
+                    self.hist_dev_df.index.isin(dev_index)]
+
             self.gpd_dict, self.gauss_df = gaussianize(self.hist_dev_df)
 
         elif gauss_df is not None:
