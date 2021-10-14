@@ -140,10 +140,11 @@ def run_load():
                 load_zone_forecast_df, scenario_start_time)
 
         ge = GeminiEngine(load_zone_actual_hists, load_zone_forecast_hists,
-                          scenario_start_time, asset_label='load')
+                          scenario_start_time, asset_type='load')
 
         ge.fit(5e-2, 5e-2)
-        ge.create_scenario(args.scenario_count, load_zone_forecast_futures)
+        ge.create_scenario(args.scenario_count, load_zone_forecast_futures,
+                           bin_width_ratio=0.1, min_sample_size=400)
         ge.write_to_csv(args.out_dir, load_zone_actual_futures,
                         write_forecasts=True)
 

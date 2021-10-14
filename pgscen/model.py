@@ -42,17 +42,20 @@ class GeminiModel(object):
                                              hist_dfs['forecast'])
 
             # Put actual, forecast and deviation into one pandas DataFrame
-            hist_df = hist_dfs['actual'].merge(
+            hist_df = hist_dfs['actual'].reset_index().merge(
                 hist_dfs['forecast'], how='inner', left_on='Time',
-                right_on='Forecast_time', suffixes=('_actual', '_forecast')
-                )
+                right_on='Forecast_time', suffixes=('_actual','_forecast')
+                ).set_index('Time')
 
             self.deviation_dict = dict()
             for asset in self.asset_list:
                 act = hist_df[asset + '_actual']
                 fcst = hist_df[asset + '_forecast']
+
                 self.deviation_dict[asset] = pd.DataFrame(
-                    {'Actual': act, 'Forecast': fcst, 'Deviation': act - fcst})
+                    {'Actual': act, 'Forecast': fcst, 'Deviation': act - fcst},
+                    index=hist_df.index
+                    )
 
             # Compute deviation from historical data: dev = actual - forecast.
             self.hist_dev_df = pd.DataFrame(columns=pd.MultiIndex.from_tuples(
@@ -200,7 +203,8 @@ class GeminiModel(object):
 
         self.forecasts = use_forecasts.unstack()
 
-    def fit_conditional_gpd(self, r=0.05, positive_actual=False):
+    def fit_conditional_gpd(self, asset_type, bin_width_ratio=0.05,
+                            min_sample_size=200, positive_actual=False):
         """
         Fit conditional GPD
         """
@@ -212,32 +216,63 @@ class GeminiModel(object):
                 asset_df = asset_df[asset_df['Actual'] > 0.]
 
             fcst_min = asset_df['Forecast'].min()
-            capacity = asset_df['Forecast'].max()
+            fcst_max = asset_df['Forecast'].max()
 
             for timestep in self.scen_timesteps:
                 fcst = self.forecasts[asset, timestep]
 
-                if fcst < fcst_min or fcst > capacity:
-                    warnings.warn(
-                        f'forecast not in the range of historical forecasts, '
-                        f'unable to fit a conditional GPD', RuntimeWarning
-                        )
+                if asset_type == 'load' or asset_type == 'wind':
+                    lower = max(fcst_min,
+                                fcst - bin_width_ratio * (fcst_max - fcst_min))
+                    upper = min(fcst_max,
+                                fcst + bin_width_ratio * (fcst_max - fcst_min))
 
-                lower = max(fcst_min, fcst - r * capacity)
-                upper = min(capacity, fcst + r * capacity)
-                data = asset_df[
-                    (asset_df['Forecast'] >= lower)
-                    & (asset_df['Forecast'] <= upper)
-                    ]['Deviation'].values
+                    selected_df = asset_df[(asset_df['Forecast'] >= lower)
+                                           & (asset_df['Forecast'] <= upper)]
+                    data = np.ascontiguousarray(
+                        selected_df['Deviation'].values)
 
-                if len(data) < 100:
-                    warnings.warn(
-                        f'using {len(data)} data points to fit GPD for asset '
-                        f'{asset} timestep {timestep}, result can be '
-                        f'unreliable', RuntimeWarning
-                        )
+                elif asset_type == 'solar':
+                    if fcst <= 0.03 * fcst_max:
+                        # Forecast <= 3% of capacity, take 0-5% bin
+                        data = np.ascontiguousarray(
+                            asset_df[asset_df['Forecast'] <= 0.05 * fcst_max][
+                                'Deviation'].values
+                            )
 
-                self.conditional_gpd_dict[asset, timestep] = fit_dist(data)
+                    else:
+                        # Otherwise take fcst +/- 5% bin
+                        lower = max(fcst_min, fcst - bin_width_ratio * (
+                                    fcst_max - fcst_min))
+                        upper = min(fcst_max, fcst + bin_width_ratio * (
+                                    fcst_max - fcst_min))
+
+                        selected_df = asset_df[(asset_df['Forecast'] >= lower)
+                                               & (asset_df['Forecast']
+                                                  <= upper)]
+                        data = np.ascontiguousarray(
+                            selected_df['Deviation'].values)
+
+                else:
+                    raise RuntimeError(f'Unrecognizable asset_type '
+                                       f'{asset_type}, must be one of load, '
+                                       f'solar or wind')
+
+                if len(data) < min_sample_size:
+                    # If binning data on forecast has < 200 samples, use the
+                    # nearest data ponts as samples
+                    idx = (asset_df.sort_values(
+                        'Forecast') - fcst).abs().sort_values(
+                            'Forecast').index[0:min_sample_size]
+                    data = np.ascontiguousarray(
+                        asset_df.loc[idx, 'Deviation'].values)
+
+                try:
+                    self.conditional_gpd_dict[asset, timestep] = fit_dist(data)
+
+                except:
+                    raise RuntimeError(
+                        f'Debugging: unable to fit gpd for {asset} {timestep}')
 
     def generate_gauss_scenarios(self, nscen: int, sqrt_cov=None, mu=None,
                                  lower_dict=None, upper_dict=None):

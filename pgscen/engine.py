@@ -14,7 +14,7 @@ from .utils.solar_utils import sun, overlap, get_solar_hist_dates
 class GeminiEngine(ABC):
 
     def __init__(self, hist_actual_df, hist_forecast_df, scen_start_time,
-                 meta_df=None, asset_label=None,
+                 meta_df=None, asset_type=None,
                  forecast_resolution_in_minute=60, num_of_horizons=24,
                  forecast_lead_time_in_hour=12):
 
@@ -25,7 +25,7 @@ class GeminiEngine(ABC):
         self.hist_forecast_df = hist_forecast_df
         self.scen_start_time = scen_start_time
         self.meta_df = meta_df
-        self.asset_label = asset_label
+        self.asset_type = asset_type
         self.model = None
 
         if meta_df is not None:
@@ -76,13 +76,13 @@ class GeminiEngine(ABC):
 
         self.model.fit(asset_rho, horizon_rho)
 
-    def create_scenario(self, nscen, forecast_df):
+    def create_scenario(self, nscen, forecast_df, **gpd_args):
         self.model.get_forecast(forecast_df)
-        self.model.fit_conditional_gpd()
+        self.model.fit_conditional_gpd(self.asset_type, **gpd_args)
         self.model.generate_gauss_scenarios(nscen)
 
-        self.scenarios[self.asset_label] = self.model.scen_df
-        self.forecasts[self.asset_label] = self.get_forecast(forecast_df)
+        self.scenarios[self.asset_type] = self.model.scen_df
+        self.forecasts[self.asset_type] = self.get_forecast(forecast_df)
 
     def get_hist_df_dict(self, assets=None):
         if assets is None:
@@ -141,7 +141,7 @@ class GeminiEngine(ABC):
 
     def write_to_csv(self, save_dir, actual_dfs, write_forecasts=True):
         if not isinstance(actual_dfs, dict):
-            actual_dfs = {self.asset_label: actual_dfs}
+            actual_dfs = {self.asset_type: actual_dfs}
 
         for asset_type, forecast in self.forecasts.items():
             scen_date = str(self.scen_start_time.strftime('%Y%m%d'))
@@ -432,7 +432,7 @@ class SolarGeminiEngine(GeminiEngine):
             self.gemini_dict['day']['forecast_lead_hours']
             )
 
-        solar_md.fit(self.get_solar_reg_param(), 1e-2)
+        solar_md.fit(self.get_solar_reg_param(), 5e-2)
         self.gemini_dict['day']['solar_model'] = solar_md
 
         # Get load data for to the same horizons in solar model
@@ -531,7 +531,7 @@ class SolarGeminiEngine(GeminiEngine):
         for mdl in ['day'] + [('cond', i) for i in range(self.cond_count)]:
             solar_md = self.gemini_dict[mdl]['gemini_model']
             solar_md.get_forecast(forecast_df)
-            solar_md.fit_conditional_gpd(positive_actual=True)
+            solar_md.fit_conditional_gpd('solar', positive_actual=True)
 
             if self.gemini_dict[mdl]['conditional_model']:
                 cond_md = self.gemini_dict[mdl]['conditional_model']
@@ -612,7 +612,8 @@ class SolarGeminiEngine(GeminiEngine):
 
         # Generate conditional scenario for load
         load_md.get_forecast(load_forecast_df)
-        load_md.fit_conditional_gpd()
+        load_md.fit_conditional_gpd('load',
+                                    bin_width_ratio=0.1, min_sample_size=400)
 
         cond_horizon_start = int(
             (solar_md.scen_start_time - load_md.scen_start_time)
@@ -628,7 +629,7 @@ class SolarGeminiEngine(GeminiEngine):
         membership = self.meta_df.groupby('Zone').groups
         solar_md = self.gemini_dict['day']['solar_model']
         solar_md.get_forecast(solar_forecast_df)
-        solar_md.fit_conditional_gpd(positive_actual=True)
+        solar_md.fit_conditional_gpd('solar', positive_actual=True)
 
         solar_joint_scen_df.columns = pd.MultiIndex.from_tuples(
             [(zone[6:], horizon)
@@ -651,7 +652,7 @@ class SolarGeminiEngine(GeminiEngine):
         for i in range(self.cond_count):
             solar_md = self.gemini_dict['cond', i]['solar_model']
             solar_md.get_forecast(solar_forecast_df)
-            solar_md.fit_conditional_gpd(positive_actual=True)
+            solar_md.fit_conditional_gpd('solar', positive_actual=True)
 
             cond_md = self.gemini_dict['cond', i]['conditional_model']
             cond_solar_md = self.gemini_dict[cond_md]['solar_model']
@@ -717,7 +718,7 @@ class SolarGeminiEngine(GeminiEngine):
         # Set the distance between asset at the same location to be a small
         # positive constant to prevent glasso from not converging
         if (rho > 0).any():
-            rho[rho == 0] = 1e-1 * np.min(rho[rho > 0])
+            rho[rho == 0] = 1e-2 * np.min(rho[rho > 0])
         else:
             rho += 1e-4
 
