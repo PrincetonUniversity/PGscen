@@ -479,3 +479,6 @@ def save_corgraph(pcor,filename,labels,minimum=0,title=None,font_size=2.0):
     r_pcor = robjects.r.matrix(robjects.FloatVector(pcor.ravel()),nrow=pcor.shape[0])
     qgraph.qgraph(r_pcor,minimum=minimum,layout='spring',labels=labels,label_cex=font_size,
                   filetype='pdf',filename=filename,title=title)
+
+def get_ecdf_data(cdf):
+    return stats.knots(cdf)

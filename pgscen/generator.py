@@ -5,7 +5,7 @@ import numpy as np
 from scipy.linalg import sqrtm
 import pandas as pd
 from scipy.stats import norm
-from pgscen.utils.r_utils import qdist,fit_dist
+from pgscen.utils.r_utils import qdist,fit_dist,get_ecdf_data
 
 class gemini_generator(object):
     
@@ -109,24 +109,37 @@ class gemini_generator(object):
 
                     # print(f'load data {asset} {horizon} = {len(data)}')
 
+                    if len(data) < min_sample_size:
+                        # If binning data on forecast has < 200 samples, use the nearest data ponts as samples
+                        idx = (asset_df.sort_values('Forecast')-fcst).abs().sort_values('Forecast').index[0:min_sample_size]
+                        data = np.ascontiguousarray(asset_df.loc[idx,'Deviation'].values)
+
                 elif asset_type == 'solar':
-                    if fcst <= 0.03*fcst_max:
+                    
+                    hist_gauss_data = get_ecdf_data(self.gpd_dict['_'.join([asset,str(horizon)])])
+                    hist_gauss_deviation_range = np.max(hist_gauss_data)-np.min(hist_gauss_data)
+
+                    if fcst <= 0.15*fcst_max and hist_gauss_deviation_range <= 0.15*fcst_max:
                         # Forecast <= 3% of capacity, take 0-5% bin
-                        data = np.ascontiguousarray(asset_df[asset_df['Forecast']<=0.05*capacity]['Deviation'].values)
+                        # data = np.ascontiguousarray(asset_df[asset_df['Forecast']<=0.01*fcst_max]['Deviation'].values)
+                        data = np.ascontiguousarray(hist_gauss_data)
+
                     else:
                         # Otherwise take fcst +/- 5% bin
                         lower = max(fcst_min,fcst-bin_width_ratio*(fcst_max-fcst_min))
                         upper = min(fcst_max,fcst+bin_width_ratio*(fcst_max-fcst_min))
                         selected_df = asset_df[(asset_df['Forecast']>=lower) & (asset_df['Forecast']<=upper)]
                         data = np.ascontiguousarray(selected_df['Deviation'].values)
+
+                        if len(data) < min_sample_size:
+                            # If binning data on forecast has < 200 samples, use the nearest data ponts as samples
+                            idx = (asset_df.sort_values('Forecast')-fcst).abs().sort_values('Forecast').index[0:min_sample_size]
+                            data = np.ascontiguousarray(asset_df.loc[idx,'Deviation'].values)
                 else:
                     raise RuntimeError(f'Unrecognizable asset_type {asset_type}, must be one of load, solar and wind')
 
 
-                if len(data) < min_sample_size:
-                    # If binning data on forecast has < 200 samples, use the nearest data ponts as samples
-                    idx = (asset_df.sort_values('Forecast')-fcst).abs().sort_values('Forecast').index[0:min_sample_size]
-                    data = np.ascontiguousarray(asset_df.loc[idx,'Deviation'].values)
+                
 
                 try:
                     self.conditional_gpd_dict['_'.join([asset,str(horizon)])] = fit_dist(data) 
