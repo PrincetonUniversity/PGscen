@@ -5,7 +5,7 @@ from scipy.linalg import sqrtm
 import pandas as pd
 from scipy.stats import norm
 from pgscen.utils.r_utils import (qdist, gaussianize, graphical_lasso, gemini,
-                                  fit_dist)
+                                  fit_dist, get_ecdf_data)
 
 
 def get_asset_list(hist_actual_df, hist_forecast_df):
@@ -139,7 +139,7 @@ class GeminiModel(object):
         self.scen_timesteps = pd.date_range(
             start=self.scen_start_time, end=self.scen_end_time,
             freq=str(self.forecast_resolution_in_minute) + 'min'
-            ).strftime('%H%M').tolist()
+            ).tolist()
 
         self.num_of_assets = len(self.asset_list)
         self.asset_cov = None
@@ -218,7 +218,8 @@ class GeminiModel(object):
             fcst_min = asset_df['Forecast'].min()
             fcst_max = asset_df['Forecast'].max()
 
-            for timestep in self.scen_timesteps:
+            # TODO: harmonize horizons and timestep indices (to timesteps)
+            for horizon, timestep in enumerate(self.scen_timesteps):
                 fcst = self.forecasts[asset, timestep]
 
                 if asset_type == 'load' or asset_type == 'wind':
@@ -232,13 +233,24 @@ class GeminiModel(object):
                     data = np.ascontiguousarray(
                         selected_df['Deviation'].values)
 
-                elif asset_type == 'solar':
-                    if fcst <= 0.03 * fcst_max:
-                        # Forecast <= 3% of capacity, take 0-5% bin
+                    if len(data) < min_sample_size:
+                        # If binning data on forecast has < 200 samples, use
+                        # the nearest data ponts as samples
+                        idx = (asset_df.sort_values(
+                            'Forecast') - fcst).abs().sort_values(
+                            'Forecast').index[0:min_sample_size]
                         data = np.ascontiguousarray(
-                            asset_df[asset_df['Forecast'] <= 0.05 * fcst_max][
-                                'Deviation'].values
-                            )
+                            asset_df.loc[idx, 'Deviation'].values)
+
+                elif asset_type == 'solar':
+                    hist_gauss_data = get_ecdf_data(
+                        self.gpd_dict[asset, horizon])
+                    hist_gauss_dev_range = np.max(
+                        hist_gauss_data) - np.min(hist_gauss_data)
+
+                    if (fcst <= 0.15 * fcst_max
+                                and hist_gauss_dev_range <= 0.15 * fcst_max):
+                        data = np.ascontiguousarray(hist_gauss_data)
 
                     else:
                         # Otherwise take fcst +/- 5% bin
@@ -250,22 +262,23 @@ class GeminiModel(object):
                         selected_df = asset_df[(asset_df['Forecast'] >= lower)
                                                & (asset_df['Forecast']
                                                   <= upper)]
+
                         data = np.ascontiguousarray(
                             selected_df['Deviation'].values)
+
+                        if len(data) < min_sample_size:
+                            # If binning data on forecast has < 200 samples,
+                            # use the nearest data ponts as samples
+                            idx = (asset_df.sort_values(
+                                'Forecast') - fcst).abs().sort_values(
+                                'Forecast').index[0:min_sample_size]
+                            data = np.ascontiguousarray(
+                                asset_df.loc[idx, 'Deviation'].values)
 
                 else:
                     raise RuntimeError(f'Unrecognizable asset_type '
                                        f'{asset_type}, must be one of load, '
                                        f'solar or wind')
-
-                if len(data) < min_sample_size:
-                    # If binning data on forecast has < 200 samples, use the
-                    # nearest data ponts as samples
-                    idx = (asset_df.sort_values(
-                        'Forecast') - fcst).abs().sort_values(
-                            'Forecast').index[0:min_sample_size]
-                    data = np.ascontiguousarray(
-                        asset_df.loc[idx, 'Deviation'].values)
 
                 try:
                     self.conditional_gpd_dict[asset, timestep] = fit_dist(data)
@@ -337,7 +350,7 @@ class GeminiModel(object):
 
             if lower_dict is not None or upper_dict is not None:
                 if lower_dict is None:
-                    lower_dict = {site: None for site in self.asset_list}
+                    lower_dict = {site: 0. for site in self.asset_list}
                 elif lower_dict == 'devi_min':
                     lower_dict = self.load_devi_min
 

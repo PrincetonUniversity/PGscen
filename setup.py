@@ -10,7 +10,7 @@ setuptools.setup(
                 "load and production of wind and solar",
     author='Xinshuo Yang',
     author_email='xy3134@princeton.edu',
-    packages=['pgscen', 'pgscen.iso', 'pgscen.utils'],
+    packages=['pgscen', 'pgscen.utils'],
 
     entry_points = {
         'console_scripts': [

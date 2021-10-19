@@ -43,6 +43,7 @@ class GeminiEngine(ABC):
             else:
                 raise GeminiError("Unrecognized type of metadata!")
 
+        self.meta_df = self.meta_df[self.meta_df.index.isin(self.asset_list)]
         self.forecast_resolution_in_minute = forecast_resolution_in_minute
         self.num_of_horizons = num_of_horizons
         self.forecast_lead_hours = forecast_lead_time_in_hour
@@ -62,7 +63,7 @@ class GeminiEngine(ABC):
         self.scen_timesteps = pd.date_range(
             start=self.scen_start_time, end=self.scen_end_time,
             freq=str(self.forecast_resolution_in_minute) + 'min'
-            ).strftime('%H%M').tolist()
+            ).tolist()
 
         self.forecasts = dict()
         self.scenarios = dict()
@@ -143,17 +144,17 @@ class GeminiEngine(ABC):
         if not isinstance(actual_dfs, dict):
             actual_dfs = {self.asset_type: actual_dfs}
 
+        fmt_timesteps = [ts.strftime('%H%M') for ts in self.scen_timesteps]
         for asset_type, forecast in self.forecasts.items():
             scen_date = str(self.scen_start_time.strftime('%Y%m%d'))
-            out_dir = Path(save_dir, scen_date, asset_type)
 
+            out_dir = Path(save_dir, scen_date, asset_type)
             if not out_dir.exists():
                 os.makedirs(out_dir)
 
             # TODO: make these concatenations cleaner
             for asset in forecast.index.unique(0):
-                df = pd.DataFrame(
-                    columns=['Type', 'Index'] + self.scen_timesteps)
+                df = pd.DataFrame(columns=['Type', 'Index'] + fmt_timesteps)
 
                 if actual_dfs[asset_type] is not None:
                     actu_arr = np.reshape(
@@ -170,7 +171,7 @@ class GeminiEngine(ABC):
                         pd.concat([pd.DataFrame([['Actual', 1]],
                                                 columns=['Type', 'Index']),
                                    pd.DataFrame(data=actu_arr,
-                                                columns=self.scen_timesteps)],
+                                                columns=fmt_timesteps)],
                                   axis=1)
                         )
 
@@ -178,7 +179,8 @@ class GeminiEngine(ABC):
                     df = df.append(
                         pd.concat([pd.DataFrame([['Forecast', 1]],
                                                 columns=['Type', 'Index']),
-                                   pd.DataFrame(forecast[asset]).T],
+                                   pd.DataFrame(data=forecast[asset].values,
+                                                index=fmt_timesteps).T],
                                   axis=1)
                         )
 
@@ -192,7 +194,10 @@ class GeminiEngine(ABC):
                                                 axis=1),
                             columns=['Type', 'Index']
                             ),
-                        self.scenarios[asset_type][asset]
+                        pd.DataFrame(
+                            data=self.scenarios[asset_type][asset].values,
+                            columns=fmt_timesteps
+                            )
                         ], axis=1)
                     )
 
