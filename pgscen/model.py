@@ -58,61 +58,63 @@ class GeminiModel(object):
                     )
 
             # Compute deviation from historical data: dev = actual - forecast.
-            self.hist_dev_df = pd.DataFrame(columns=pd.MultiIndex.from_tuples(
-                [(asset, hz) for asset in self.asset_list
-                 for hz in range(self.num_of_horizons)]
-                ))
-
-            gb = hist_dfs['forecast'].groupby('Issue_time')
-            for issue_time in gb.groups.keys():
-                forecast_start_time = issue_time + pd.Timedelta(
+            hist_dev_dict = dict()
+            for issue_time, fcsts in hist_dfs['forecast'].groupby(
+                    'Issue_time'):
+                fcst_start_time = issue_time + pd.Timedelta(
                     self.forecast_lead_hours, unit='H')
 
-                forecast_end_time = pd.Timedelta(
-                    self.forecast_resolution_in_minute
-                    * (self.num_of_horizons - 1),
-                    unit='min'
-                    )
-                forecast_end_time += forecast_start_time
+                fcst_end_time = pd.Timedelta(self.forecast_resolution_in_minute
+                                             * (self.num_of_horizons - 1),
+                                             unit='min')
+                fcst_end_time += fcst_start_time
 
                 # Get actual
                 act_df = hist_dfs['actual'][
-                    (hist_dfs['actual'].index >= forecast_start_time)
-                    & (hist_dfs['actual'].index <= forecast_end_time)
+                    (hist_dfs['actual'].index >= fcst_start_time)
+                    & (hist_dfs['actual'].index <= fcst_end_time)
                     ][self.asset_list]
 
                 # Get forecast
-                fcst_df = gb.get_group(issue_time).drop(
-                    columns='Issue_time').set_index(
+                fcst_df = fcsts.drop(columns='Issue_time').set_index(
                     'Forecast_time').sort_index()
+
                 fcst_df = fcst_df[
-                    (fcst_df.index >= forecast_start_time)
-                    & (fcst_df.index <= forecast_end_time)
+                    (fcst_df.index >= fcst_start_time)
+                    & (fcst_df.index <= fcst_end_time)
                     ][self.asset_list]
 
                 # Create lagged deviations
                 if act_df.shape != (self.num_of_horizons,
                                     len(self.asset_list)):
                     warnings.warn(
-                        f'unable to find actual data to be matched with forecast issued at {issue_time}',
-                        RuntimeWarning)
-                elif fcst_df.shape != (
-                        self.num_of_horizons, len(self.asset_list)):
-                    warnings.warn(
-                        f'forecast issued at {issue_time} does not have {self.num_of_horizons} horizons',
-                        RuntimeWarning)
-                else:
-                    # Compute difference
-                    arr = np.reshape(act_df.values.T, (
-                        1, len(self.asset_list) * self.num_of_horizons))- \
-                          np.reshape(fcst_df.values.T, (
-                              1, len(self.asset_list) * self.num_of_horizons))
-
-                    self.hist_dev_df = self.hist_dev_df.append(
-                        pd.DataFrame(data=arr,
-                                     index=[forecast_start_time],
-                                     columns=self.hist_dev_df.columns)
+                        f'unable to find actual data to be matched with '
+                        f'forecast issued at {issue_time}',
+                        RuntimeWarning
                         )
+
+                elif fcst_df.shape != (self.num_of_horizons,
+                                       len(self.asset_list)):
+                    warnings.warn(
+                        f'forecast issued at {issue_time} does not have '
+                        f'{self.num_of_horizons} horizons',
+                        RuntimeWarning
+                        )
+
+                # Compute difference
+                else:
+                    hist_dev_dict[
+                        fcst_start_time] = act_df.stack() - fcst_df.stack()
+
+                    hist_dev_dict[fcst_start_time].index = hist_dev_dict[
+                        fcst_start_time].index.set_levels(
+                        tuple(range(self.num_of_horizons)),
+                        level=0
+                        )
+
+            self.hist_dev_df = pd.DataFrame(hist_dev_dict)
+            self.hist_dev_df.index = self.hist_dev_df.index.swaplevel()
+            self.hist_dev_df = self.hist_dev_df.sort_index().transpose()
 
             if dev_index is not None:
                 self.hist_dev_df = self.hist_dev_df[

@@ -43,7 +43,9 @@ class GeminiEngine(ABC):
             else:
                 raise GeminiError("Unrecognized type of metadata!")
 
-        self.meta_df = self.meta_df[self.meta_df.index.isin(self.asset_list)]
+            self.meta_df = self.meta_df[
+                self.meta_df.index.isin(self.asset_list)]
+
         self.forecast_resolution_in_minute = forecast_resolution_in_minute
         self.num_of_horizons = num_of_horizons
         self.forecast_lead_hours = forecast_lead_time_in_hour
