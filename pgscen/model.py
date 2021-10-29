@@ -36,6 +36,23 @@ class GeminiModel(object):
         self.forecast_resolution_in_minute = forecast_resolution_in_minute
         self.forecast_lead_hours = forecast_lead_time_in_hour
 
+        self.forecast_issue_time = (
+                self.scen_start_time - pd.Timedelta(self.forecast_lead_hours,
+                                                    unit='H')
+                )
+
+        self.scen_end_time = (
+                self.scen_start_time
+                + pd.Timedelta((self.num_of_horizons - 1)
+                               * self.forecast_resolution_in_minute,
+                               unit='min')
+                )
+
+        self.scen_timesteps = pd.date_range(
+            start=self.scen_start_time, end=self.scen_end_time,
+            freq=str(self.forecast_resolution_in_minute) + 'min'
+            ).tolist()
+
         if hist_dfs is not None:
             self.gauss = False
             self.asset_list = get_asset_list(hist_dfs['actual'],
@@ -120,28 +137,17 @@ class GeminiModel(object):
                 self.hist_dev_df = self.hist_dev_df[
                     self.hist_dev_df.index.isin(dev_index)]
 
-            self.gpd_dict, self.gauss_df = gaussianize(self.hist_dev_df)
+            gpd_dict, self.gauss_df = gaussianize(self.hist_dev_df)
+            self.gpd_dict = {
+                (asset, timestep): gpd_dict[asset, horizon]
+                for asset in self.asset_list
+                for horizon, timestep in enumerate(self.scen_timesteps)
+                }
 
         elif gauss_df is not None:
             self.gauss = True
             self.asset_list = gauss_df.columns.levels[0]
             self.gauss_df = gauss_df
-
-        self.forecast_issue_time = (
-            self.scen_start_time - pd.Timedelta(self.forecast_lead_hours,
-                                                unit='H')
-            )
-
-        self.scen_end_time = (
-            self.scen_start_time
-            + pd.Timedelta((self.num_of_horizons - 1)
-                           * self.forecast_resolution_in_minute, unit='min')
-            )
-
-        self.scen_timesteps = pd.date_range(
-            start=self.scen_start_time, end=self.scen_end_time,
-            freq=str(self.forecast_resolution_in_minute) + 'min'
-            ).tolist()
 
         self.num_of_assets = len(self.asset_list)
         self.asset_cov = None
@@ -220,8 +226,7 @@ class GeminiModel(object):
             fcst_min = asset_df['Forecast'].min()
             fcst_max = asset_df['Forecast'].max()
 
-            # TODO: harmonize horizons and timestep indices (to timesteps)
-            for horizon, timestep in enumerate(self.scen_timesteps):
+            for timestep in self.scen_timesteps:
                 fcst = self.forecasts[asset, timestep]
 
                 if asset_type == 'load' or asset_type == 'wind':
@@ -245,14 +250,14 @@ class GeminiModel(object):
                             asset_df.loc[idx, 'Deviation'].values)
 
                 elif asset_type == 'solar':
-                    hist_gauss_data = get_ecdf_data(
-                        self.gpd_dict[asset, horizon])
-                    hist_gauss_dev_range = np.max(
-                        hist_gauss_data) - np.min(hist_gauss_data)
+                    hist_dev_data = get_ecdf_data(
+                        self.gpd_dict[asset, timestep])
+                    hist_dev_range = np.max(
+                        hist_dev_data) - np.min(hist_dev_data)
 
                     if (fcst <= 0.15 * fcst_max
-                                and hist_gauss_dev_range <= 0.15 * fcst_max):
-                        data = np.ascontiguousarray(hist_gauss_data)
+                            and hist_dev_range <= 0.15 * fcst_max):
+                        data = np.ascontiguousarray(hist_dev_data)
 
                     else:
                         # Otherwise take fcst +/- 5% bin
@@ -350,22 +355,27 @@ class GeminiModel(object):
                     for i, col in enumerate(scen_df.columns)
                     })
 
-            if lower_dict is not None or upper_dict is not None:
-                if lower_dict is None:
-                    lower_dict = {site: 0. for site in self.asset_list}
-                elif lower_dict == 'devi_min':
-                    lower_dict = self.load_devi_min
+        self.scen_deviation_df = scen_df.copy()
 
-                if upper_dict is None:
-                    upper_dict = {site: None for site in self.asset_list}
-
-                for site in self.asset_list:
-                    scen_df[site] = scen_df[site].clip(lower=lower_dict[site],
-                                                       upper=upper_dict[site])
-
-        self.scen_deviation_df = scen_df
         if self.forecasts is not None:
-            self.scen_df = self.scen_deviation_df + self.forecasts
+            scen_df = self.scen_deviation_df + self.forecasts
+
+            if lower_dict is None:
+                lower_dict = {site: 0. for site in self.asset_list}
+            elif lower_dict == 'devi_min':
+                lower_dict = self.load_devi_min
+
+            if upper_dict is None:
+                upper_dict = {site: None for site in self.asset_list}
+
+            for site in self.asset_list:
+                scen_df[site] = scen_df[site].clip(lower=lower_dict[site],
+                                                   upper=upper_dict[site])
+
+            self.scen_df = scen_df
+
+        else:
+            self.scen_df = None
 
     def conditional_multivar_normal_partial_time(
             self, cond_hz_start, cond_hz_end, cond_scen_df):
