@@ -11,11 +11,9 @@ dependencies:
   - statsmodels
   - jupyterlab
   - openpyxl
-  - h5py
   - rpy2
-  - R
+  - h5py
   - r-essentials=4.0
-  - r-base=4.0
   - r-glasso
   - r-qgraph
   - r-robustbase
@@ -28,3 +26,4 @@ dependencies:
   - r-plot3d
   - pip:
     - astral
+

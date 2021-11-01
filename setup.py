@@ -1,6 +1,8 @@
 #!/bin/usr/env python
 import os
+import sys
 import setuptools
+from pathlib import Path
 
 
 setuptools.setup(
@@ -21,8 +23,7 @@ setuptools.setup(
             ],
         },
 
-    install_requires=['rpy2', 'numpy', 'matplotlib', 'pandas',
-                      'scipy', 'jupyter', 'openpyxl'],
+    install_requires=['numpy', 'matplotlib', 'pandas', 'scipy'],
     )
 
 
@@ -30,5 +31,10 @@ os.system("curl https://carmona.princeton.edu/SVbook/Rsafd.zip "
           "--output Rsafd.zip")
 os.system("unzip Rsafd.zip")
 os.system('R -e "install.packages(\'Rsafd\', repos = NULL, type=\'source\')"')
-os.system('rm -rf Rsafd Rsafd.zip')
+os.system("rm -rf Rsafd Rsafd.zip")
 
+# hacky way tp get around flawed TclTk installs on MacOS
+tcltk_path = Path(sys.exec_prefix,
+                  "lib", "R", "library", "tcltk", "libs", "tcltk.so")
+if not tcltk_path.exists():
+    os.system("cp {} {}".format(tcltk_path.with_suffix(".dylib"), tcltk_path))
