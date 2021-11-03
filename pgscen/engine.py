@@ -3,15 +3,16 @@ import os
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from abc import ABC
 from datetime import datetime
+from operator import itemgetter
+from astral import Observer
+from astral.sun import sun
 
-from astral import LocationInfo
 from .model import get_asset_list, GeminiModel, GeminiError
-from .utils.solar_utils import sun, overlap, get_solar_hist_dates
+from .utils.solar_utils import overlap, get_yearly_date_range
 
 
-class GeminiEngine(ABC):
+class GeminiEngine(object):
 
     def __init__(self, hist_actual_df, hist_forecast_df, scen_start_time,
                  meta_df=None, asset_type=None,
@@ -213,7 +214,7 @@ class SolarGeminiEngine(GeminiEngine):
     def __init__(self, solar_hist_actual_df, solar_hist_forecast_df,
                  scen_start_time, solar_meta_df,
                  forecast_resolution_in_minute=60, num_of_horizons=24,
-                 forecast_lead_time_in_hour=12):
+                 forecast_lead_time_in_hour=12, us_state='Texas'):
         super().__init__(solar_hist_actual_df, solar_hist_forecast_df,
                          scen_start_time, solar_meta_df, 'solar',
                          forecast_resolution_in_minute, num_of_horizons,
@@ -224,15 +225,15 @@ class SolarGeminiEngine(GeminiEngine):
                                        periods=self.num_of_horizons,
                                        freq=stepsize)
 
+        self.asset_locs = {site: Observer(lat, lon)
+                           for site, lat, lon in zip(solar_meta_df.site_ids,
+                                                     solar_meta_df.latitude,
+                                                     solar_meta_df.longitude)}
+
         # Get scenario date
         local_date = self.scen_start_time.tz_convert('US/Central').date()
-        asset_suns = {
-            site: sun(LocationInfo(site, 'Texas', 'USA', lat, lon).observer,
-                      date=local_date)
-            for site, lat, lon in zip(self.meta_df.index,
-                                      self.meta_df.latitude,
-                                      self.meta_df.longitude)
-            }
+        asset_suns = {site: sun(loc, date=local_date)
+                      for site, loc in self.asset_locs.items()}
 
         first_sunrise, last_sunrise = None, None
         first_sunset, last_sunset = None, None
@@ -327,6 +328,17 @@ class SolarGeminiEngine(GeminiEngine):
         self.cond_count = cond_indx
         self.asset_distance_mat = self.asset_distance()
 
+        if us_state == 'Texas':
+            self.time_shift = 6
+        elif us_state == 'California':
+            self.time_shift = 8
+
+        else:
+            raise ValueError("The only US states currently supported are "
+                             "Texas and California!")
+
+        self.us_state = us_state
+
     def fit_solar_model(self, hist_start='2017-01-01',hist_end='2018-12-31'):
         """Fit solar models with chosen parameters"""
 
@@ -340,13 +352,13 @@ class SolarGeminiEngine(GeminiEngine):
                 minute_range = 10
 
             # Determine historical dates
-            hist_dates = get_solar_hist_dates(
-                self.scen_start_time.floor('D'), self.meta_df.loc[asset_list],
+            hist_dates = self.get_solar_hist_dates(
+                self.scen_start_time.floor('D'), asset_list,
                 hist_start, hist_end, time_range_in_minutes=minute_range
                 )
 
             # Shift hours in the historical date due to utc
-            if hour >= 6:
+            if hour >= self.time_shift:
                 self.gemini_dict[mdl]['hist_deviation_index'] = [
                     date + pd.Timedelta(hour, unit='H')
                     for date in hist_dates
@@ -372,12 +384,13 @@ class SolarGeminiEngine(GeminiEngine):
     def fit_load_solar_joint_model(self,
                                    load_hist_actual_df, load_hist_forecast_df,
                                    hist_start='2017-01-01',
-                                   hist_end='2018-12-31'):
+                                   hist_end='2018-12-31', load_zonal=True):
         """
         Fit load and solar models with chosen parameters:
         The base model for load and solar is joint model.
 
         """
+        self.load_zonal = load_zonal
 
         load_zone_list = get_asset_list(load_hist_actual_df,
                                         load_hist_forecast_df)
@@ -385,14 +398,14 @@ class SolarGeminiEngine(GeminiEngine):
         ####################### Base model ##################################
 
         # Determine historical dates
-        day_hist_dates = get_solar_hist_dates(
-            self.scen_start_time.floor('D'), self.meta_df,
+        day_hist_dates = self.get_solar_hist_dates(
+            self.scen_start_time.floor('D'), self.asset_list,
             hist_start, hist_end, time_range_in_minutes=30
             )
 
         # Shift solar historical dates by the hour of scenario start time due to utc
         solar_hour = self.gemini_dict['day']['scenario_start_time'].hour
-        if solar_hour >= 6:
+        if solar_hour >= self.time_shift:
             self.gemini_dict['day']['solar_hist_deviation_index'] = [
                 date + pd.Timedelta(solar_hour, unit='H')
                 for date in day_hist_dates
@@ -406,9 +419,10 @@ class SolarGeminiEngine(GeminiEngine):
 
         # Shift load historical dates by the hour of scenario start time due to utc
         load_hour = self.scen_start_time.hour
-        load_hist_dates = self.get_yearly_date_range(60, hist_start, hist_end)
+        load_hist_dates = get_yearly_date_range(
+            self.scen_start_time.floor('D'), 60, hist_start, hist_end)
 
-        if load_hour >= 6:
+        if load_hour >= self.time_shift:
             self.gemini_dict['day']['load_hist_deviation_index'] = [
                 date + pd.Timedelta(load_hour, unit='H')
                 for date in load_hist_dates
@@ -458,25 +472,36 @@ class SolarGeminiEngine(GeminiEngine):
         load_gauss_df.index += horizon_shift * pd.Timedelta(
             self.forecast_resolution_in_minute, unit='min')
 
-        # get zonal solar data, add prefix to differentiate
-        # between load and solar zones
-        solar_zone_gauss_df = pd.DataFrame({
-            ('_'.join(['Solar', zone]), horizon): solar_md.gauss_df[
-                [(site, horizon) for site in sites]].sum(axis=1)
-            for zone, sites in self.meta_df.groupby('Zone').groups.items()
-            for horizon in range(solar_md.num_of_horizons)
-            })
-        solar_zone_list = solar_zone_gauss_df.columns.levels[0].tolist()
+        if load_zonal:
+            # get zonal solar data, add prefix to differentiate
+            # between load and solar zones
+            solar_gauss_df = pd.DataFrame({
+                ('_'.join(['Solar', zone]), horizon): solar_md.gauss_df[
+                    [(site, horizon) for site in sites]].sum(axis=1)
+                for zone, sites in self.meta_df.groupby('Zone').groups.items()
+                for horizon in range(solar_md.num_of_horizons)
+                })
+            solar_zone_list = solar_gauss_df.columns.levels[0].tolist()
 
-        # Standardize zonal data
-        solar_zone_gauss_df_mean = solar_zone_gauss_df.mean()
-        solar_zone_gauss_df_std = solar_zone_gauss_df.std()
-        solar_zone_gauss_df = solar_zone_gauss_df - solar_zone_gauss_df_mean
-        solar_zone_gauss_df /= solar_zone_gauss_df_std
+            # Standardize zonal data
+            solar_zone_gauss_df_mean = solar_gauss_df.mean()
+            solar_zone_gauss_df_std = solar_gauss_df.std()
+            solar_zone_gauss_df = solar_gauss_df - solar_zone_gauss_df_mean
+            solar_zone_gauss_df /= solar_zone_gauss_df_std
+            self.solar_zone_mean = solar_zone_gauss_df_mean
+            self.solar_zone_std = solar_zone_gauss_df_std
+
+        else:
+            solar_gauss_df = pd.DataFrame({
+                ('_'.join(['Solar', site]), horizon): solar_md.gauss_df[
+                    (site, horizon)]
+                for site in self.asset_list
+                for horizon in range(solar_md.num_of_horizons)
+                })
 
         joint_md = GeminiModel(
             self.gemini_dict['day']['scenario_start_time'],
-            None, load_gauss_df.merge(solar_zone_gauss_df,
+            None, load_gauss_df.merge(solar_gauss_df,
                                       how='inner', left_index=True,
                                       right_index=True),
             None, self.forecast_resolution_in_minute,
@@ -486,8 +511,6 @@ class SolarGeminiEngine(GeminiEngine):
 
         joint_md.fit(0.05, 0.05)
         self.gemini_dict['day']['joint_model'] = joint_md
-        self.solar_zone_mean = solar_zone_gauss_df_mean
-        self.solar_zone_std = solar_zone_gauss_df_std
 
         ################### Conditional models ##############################
 
@@ -495,8 +518,8 @@ class SolarGeminiEngine(GeminiEngine):
             asset_list = self.gemini_dict['cond', i]['asset_list']
 
             # Determine historical dates
-            solar_hist_dates = get_solar_hist_dates(
-                self.scen_start_time.floor('D'), self.meta_df.loc[asset_list],
+            solar_hist_dates = self.get_solar_hist_dates(
+                self.scen_start_time.floor('D'), asset_list,
                 hist_start, hist_end, time_range_in_minutes=10
                 )
 
@@ -504,7 +527,7 @@ class SolarGeminiEngine(GeminiEngine):
             solar_hour = self.gemini_dict['cond', i][
                 'scenario_start_time'].hour
 
-            if solar_hour >= 6:
+            if solar_hour >= self.time_shift:
                 self.gemini_dict['cond', i]['hist_deviation_index'] = [
                     date + pd.Timedelta(solar_hour, unit='H')
                     for date in solar_hist_dates
@@ -614,8 +637,9 @@ class SolarGeminiEngine(GeminiEngine):
              if zone.startswith('Solar_')]
             ]
 
-        solar_joint_scen_df = (solar_joint_scen_df * self.solar_zone_std
-                               + self.solar_zone_mean)
+        if self.load_zonal:
+            solar_joint_scen_df = (solar_joint_scen_df * self.solar_zone_std
+                                   + self.solar_zone_mean)
 
         # Generate conditional scenario for load
         load_md.get_forecast(load_forecast_df)
@@ -632,8 +656,6 @@ class SolarGeminiEngine(GeminiEngine):
             cond_horizon_start, cond_horizon_end, load_joint_scen_df)
         load_md.generate_gauss_scenarios(nscen, sqrt_cov=sqrtcov, mu=mu)
 
-        # Generate conditional scenario for solar
-        membership = self.meta_df.groupby('Zone').groups
         solar_md = self.gemini_dict['day']['solar_model']
         solar_md.get_forecast(solar_forecast_df)
         solar_md.fit_conditional_gpd('solar', positive_actual=True)
@@ -643,8 +665,16 @@ class SolarGeminiEngine(GeminiEngine):
              for zone, horizon in solar_joint_scen_df.columns]
             )
 
-        sqrt_cov, mu = solar_md.conditional_multivar_normal_aggregation(
-            solar_joint_scen_df, membership)
+        # Generate conditional scenario for solar
+        if self.load_zonal:
+            membership = self.meta_df.groupby('Zone').groups
+
+            sqrt_cov, mu = solar_md.conditional_multivar_normal_aggregation(
+                solar_joint_scen_df, membership)
+
+        else:
+            sqrt_cov, mu = solar_md.conditional_multivar_normal_partial_time(
+                0, len(solar_md.scen_timesteps) - 1, solar_joint_scen_df)
 
         solar_md.generate_gauss_scenarios(
             nscen, sqrt_cov=sqrt_cov, mu=mu,
@@ -691,26 +721,54 @@ class SolarGeminiEngine(GeminiEngine):
         self.forecasts['load'] = self.get_forecast(load_forecast_df)
         self.forecasts['solar'] = self.get_forecast(solar_forecast_df)
 
-    def get_yearly_date_range(self, num_of_days=60,
-                              start='2017-01-01', end='2018-12-31'):
-        """
-        Get date range around a specific date
-        """
-        date = self.scen_start_time.floor('D')
-        hist_dates = pd.date_range(start=start,end=end,freq='D',tz='utc')
-        hist_years = hist_dates.year.unique()
-        hist_dates = set(hist_dates)
+    def get_solar_hist_dates(self, date, assets, hist_start, hist_end,
+                             time_range_in_minutes=15):
 
-        # Take 60 days before and after
-        near_dates = set()
-        for year in hist_years:
-            year_date = datetime(year,date.month,date.day)
-            near_dates = near_dates.union(set(pd.date_range(
-                start=year_date-pd.Timedelta(num_of_days, unit='D'),
-                periods=2*num_of_days+1,freq='D', tz='utc')
-                ))
+        hist_dates = get_yearly_date_range(date, start=hist_start,
+                                           end=hist_end)
+        asset_suns = {asset: sun(self.asset_locs[asset], date=date)
+                      for asset in assets}
 
-        return hist_dates.intersection(near_dates)
+        for site in asset_suns:
+            for sun_time in ['sunrise', 'sunset']:
+                asset_suns[site][sun_time] = datetime.combine(
+                    datetime.min,
+                    pd.to_datetime(asset_suns[site][sun_time]).tz_convert(
+                        'US/Central').time()
+                    )
+
+        cur_rises = pd.Series({site: s['sunrise']
+                               for site, s in asset_suns.items()})
+        cur_sets = pd.Series(
+            {site: s['sunset'] for site, s in asset_suns.items()})
+
+        hist_suns = {asset: {hist_date: sun(self.asset_locs[asset],
+                                            date=hist_date)
+                            for hist_date in hist_dates}
+                     for asset in assets}
+
+        for site in asset_suns:
+            for hist_date in hist_dates:
+                for sun_time in ['sunrise', 'sunset']:
+                    hist_suns[site][hist_date][sun_time] = datetime.combine(
+                        datetime.min,
+                        pd.to_datetime(
+                            hist_suns[site][hist_date][sun_time]).tz_convert(
+                            'US/Central'
+                            ).time()
+                        )
+
+        sun_df = pd.DataFrame(hist_suns)
+        sunrise_df = sun_df.applymap(itemgetter('sunrise'))
+        sunset_df = sun_df.applymap(itemgetter('sunset'))
+
+        max_diff = pd.Timedelta(time_range_in_minutes, unit='min')
+        rise_diffs = (sunrise_df - cur_rises).abs() <= max_diff
+        set_diffs = (sunset_df - cur_sets).abs() <= max_diff
+        hist_stats = (rise_diffs & set_diffs).all(axis=1)
+
+        return {hist_time for hist_time, hist_stat in hist_stats.iteritems()
+                if hist_stat}
 
     def get_solar_reg_param(self, assets=None):
         if assets is None:
