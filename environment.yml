@@ -10,6 +10,7 @@ dependencies:
   - matplotlib
   - statsmodels
   - jupyterlab
+  - seaborn
   - openpyxl
   - rpy2
   - h5py

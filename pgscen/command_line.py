@@ -6,9 +6,7 @@ import time
 
 from .utils.data_utils import (load_load_data, load_wind_data, load_solar_data,
                                split_actuals_hist_future,
-                               split_forecasts_hist_future,
-                               split_actuals_hist_future_wind,
-                               split_forecasts_hist_future_wind)
+                               split_forecasts_hist_future)
 from .engine import GeminiEngine, SolarGeminiEngine
 
 
@@ -24,8 +22,6 @@ parent_parser.add_argument(
 parent_parser.add_argument(
     'days', type=int, help="for how many days to create scenarios for")
 
-parent_parser.add_argument('in_dir', type=str,
-                           help="where input datasets are stored")
 parent_parser.add_argument('--out-dir', '-o', type=str,
                            default=os.getcwd(), dest='out_dir',
                            help="where generated scenarios will be stored")
@@ -44,7 +40,7 @@ def run_load():
     args = parser.parse_args()
 
     start = ' '.join([args.start, "06:00:00"])
-    load_zone_actual_df, load_zone_forecast_df = load_load_data(args.in_dir)
+    load_zone_actual_df, load_zone_forecast_df = load_load_data()
 
     if args.verbose >= 2:
         t0 = time.time()
@@ -55,12 +51,15 @@ def run_load():
             print("Creating load scenarios for: {}".format(
                 scenario_start_time.date()))
 
+        scen_timesteps = pd.date_range(start=scenario_start_time,
+                                       periods=24, freq='H')
+
         (load_zone_actual_hists,
             load_zone_actual_futures) = split_actuals_hist_future(
-                load_zone_actual_df, scenario_start_time)
+                load_zone_actual_df, scen_timesteps)
         (load_zone_forecast_hists,
             load_zone_forecast_futures) = split_forecasts_hist_future(
-                load_zone_forecast_df, scenario_start_time)
+                load_zone_forecast_df, scen_timesteps)
 
         ge = GeminiEngine(load_zone_actual_hists, load_zone_forecast_hists,
                           scenario_start_time, asset_type='load')
@@ -90,7 +89,7 @@ def run_wind():
 
     start = ' '.join([args.start, "06:00:00"])
     (wind_site_actual_df, wind_site_forecast_df,
-        wind_meta_df) = load_wind_data(args.in_dir)
+        wind_meta_df) = load_wind_data()
 
     if args.verbose >= 2:
         t0 = time.time()
@@ -105,11 +104,11 @@ def run_wind():
                                        periods=24, freq='H')
 
         (wind_site_actual_hists,
-            wind_site_actual_futures) = split_actuals_hist_future_wind(
-                    wind_site_actual_df, scen_timesteps)
+            wind_site_actual_futures) = split_actuals_hist_future(
+                    wind_site_actual_df, scen_timesteps, in_sample=True)
         (wind_site_forecast_hists,
-            wind_site_forecast_futures) = split_forecasts_hist_future_wind(
-                    wind_site_forecast_df, scen_timesteps)
+            wind_site_forecast_futures) = split_forecasts_hist_future(
+                    wind_site_forecast_df, scen_timesteps, in_sample=True)
 
         ge = GeminiEngine(wind_site_actual_hists, wind_site_forecast_hists,
                           scenario_start_time, wind_meta_df, 'wind')
@@ -140,7 +139,7 @@ def run_solar():
 
     start = ' '.join([args.start, "06:00:00"])
     (solar_site_actual_df, solar_site_forecast_df,
-        solar_meta_df) = load_solar_data(args.in_dir)
+        solar_meta_df) = load_solar_data()
 
     if args.verbose >= 2:
         t0 = time.time()
@@ -151,12 +150,15 @@ def run_solar():
             print("Creating solar scenarios for: {}".format(
                 scenario_start_time.date()))
 
+        scen_timesteps = pd.date_range(start=scenario_start_time,
+                                       periods=24, freq='H')
+
         (solar_site_actual_hists,
             solar_site_actual_futures) = split_actuals_hist_future(
-                    solar_site_actual_df, scenario_start_time)
+                    solar_site_actual_df, scen_timesteps)
         (solar_site_forecast_hists,
             solar_site_forecast_futures) = split_forecasts_hist_future(
-                    solar_site_forecast_df, scenario_start_time)
+                    solar_site_forecast_df, scen_timesteps)
 
         se = SolarGeminiEngine(solar_site_actual_hists,
                                solar_site_forecast_hists,
@@ -187,9 +189,9 @@ def run_load_solar_joint():
     args = parser.parse_args()
 
     start = ' '.join([args.start, "06:00:00"])
-    load_zone_actual_df, load_zone_forecast_df = load_load_data(args.in_dir)
+    load_zone_actual_df, load_zone_forecast_df = load_load_data()
     (solar_site_actual_df, solar_site_forecast_df,
-        solar_meta_df) = load_solar_data(args.in_dir)
+        solar_meta_df) = load_solar_data()
 
     if args.verbose >= 2:
         t0 = time.time()
@@ -200,19 +202,22 @@ def run_load_solar_joint():
             print("Creating load-solar joint scenarios for: {}".format(
                 scenario_start_time.date()))
 
+        scen_timesteps = pd.date_range(start=scenario_start_time,
+                                       periods=24, freq='H')
+
         (solar_site_actual_hists,
             solar_site_actual_futures) = split_actuals_hist_future(
-                    solar_site_actual_df, scenario_start_time)
+                    solar_site_actual_df, scen_timesteps)
         (solar_site_forecast_hists,
             solar_site_forecast_futures) = split_forecasts_hist_future(
-                    solar_site_forecast_df, scenario_start_time)
+                    solar_site_forecast_df, scen_timesteps)
 
         (load_zone_actual_hists,
             load_zone_actual_futures) = split_actuals_hist_future(
-                    load_zone_actual_df, scenario_start_time)
+                    load_zone_actual_df, scen_timesteps)
         (load_zone_forecast_hists,
             load_zone_forecast_futures) = split_forecasts_hist_future(
-                    load_zone_forecast_df, scenario_start_time)
+                    load_zone_forecast_df, scen_timesteps)
 
         se = SolarGeminiEngine(solar_site_actual_hists,
                                solar_site_forecast_hists,
