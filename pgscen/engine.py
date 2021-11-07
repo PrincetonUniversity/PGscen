@@ -252,9 +252,6 @@ class SolarGeminiEngine(GeminiEngine):
             if last_sunset is None or sunset > last_sunset:
                 last_sunset = sunset
 
-        print('sun rise set times:')
-        print(first_sunrise, last_sunrise, first_sunset, last_sunset)
-
         # Determine model parameters
         sunrise_period = (first_sunrise, last_sunrise)
         sunset_period = (first_sunset, last_sunset)

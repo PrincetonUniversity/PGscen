@@ -1,7 +1,11 @@
+"""Command line interface for generating scenarios with ERCOT/NREL datasets."""
 
 import argparse
 import os
 import pandas as pd
+from pathlib import Path
+import bz2
+import dill as pickle
 import time
 
 from .utils.data_utils import (load_load_data, load_wind_data, load_solar_data,
@@ -31,16 +35,25 @@ parent_parser.add_argument('--scenario-count', '-n', type=int,
                            help="how many scenarios to generate")
 parent_parser.add_argument('--verbose', '-v', action='count', default=0)
 
+parent_parser.add_argument('--test', action='store_true')
+test_path = Path(Path(__file__).parent.parent, 'test', 'resources')
+
 
 def run_load():
     parser = argparse.ArgumentParser(
         'pgscen-load', parents=[parent_parser],
         description="Create day ahead load scenarios."
         )
-    args = parser.parse_args()
 
+    args = parser.parse_args()
     start = ' '.join([args.start, "06:00:00"])
-    load_zone_actual_df, load_zone_forecast_df = load_load_data()
+
+    if args.test:
+        with bz2.BZ2File(Path(test_path, "load.p.gz"), 'r') as f:
+            load_zone_actual_df, load_zone_forecast_df = pickle.load(f)
+
+    else:
+        load_zone_actual_df, load_zone_forecast_df = load_load_data()
 
     if args.verbose >= 2:
         t0 = time.time()
@@ -85,11 +98,18 @@ def run_wind():
         'pgscen-wind', parents=[parent_parser],
         description="Create day ahead wind scenarios."
         )
-    args = parser.parse_args()
 
+    args = parser.parse_args()
     start = ' '.join([args.start, "06:00:00"])
-    (wind_site_actual_df, wind_site_forecast_df,
-        wind_meta_df) = load_wind_data()
+
+    if args.test:
+        with bz2.BZ2File(Path(test_path, "wind.p.gz"), 'r') as f:
+            (wind_site_actual_df, wind_site_forecast_df,
+                wind_meta_df) = pickle.load(f)
+
+    else:
+        (wind_site_actual_df, wind_site_forecast_df,
+            wind_meta_df) = load_wind_data()
 
     if args.verbose >= 2:
         t0 = time.time()
@@ -135,11 +155,18 @@ def run_solar():
         'pgscen-solar', parents=[parent_parser],
         description="Create day ahead solar scenarios."
         )
-    args = parser.parse_args()
 
+    args = parser.parse_args()
     start = ' '.join([args.start, "06:00:00"])
-    (solar_site_actual_df, solar_site_forecast_df,
-        solar_meta_df) = load_solar_data()
+
+    if args.test:
+        with bz2.BZ2File(Path(test_path, "solar.p.gz"), 'r') as f:
+            (solar_site_actual_df, solar_site_forecast_df,
+                solar_meta_df) = pickle.load(f)
+
+    else:
+        (solar_site_actual_df, solar_site_forecast_df,
+            solar_meta_df) = load_solar_data()
 
     if args.verbose >= 2:
         t0 = time.time()
@@ -186,12 +213,22 @@ def run_load_solar_joint():
         'pgscen-load-solar', parents=[parent_parser],
         description="Create day ahead load-solar jointly modeled scenarios."
         )
-    args = parser.parse_args()
 
+    args = parser.parse_args()
     start = ' '.join([args.start, "06:00:00"])
-    load_zone_actual_df, load_zone_forecast_df = load_load_data()
-    (solar_site_actual_df, solar_site_forecast_df,
-        solar_meta_df) = load_solar_data()
+
+    if args.test:
+        with bz2.BZ2File(Path(test_path, "load.p.gz"), 'r') as f:
+            load_zone_actual_df, load_zone_forecast_df = pickle.load(f)
+
+        with bz2.BZ2File(Path(test_path, "solar.p.gz"), 'r') as f:
+            (solar_site_actual_df, solar_site_forecast_df,
+                solar_meta_df) = pickle.load(f)
+
+    else:
+        load_zone_actual_df, load_zone_forecast_df = load_load_data()
+        (solar_site_actual_df, solar_site_forecast_df,
+            solar_meta_df) = load_solar_data()
 
     if args.verbose >= 2:
         t0 = time.time()
