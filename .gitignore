@@ -3,4 +3,5 @@
 *egg-info
 .DS_Store
 build/
+.ipynb_checkpoints
 
