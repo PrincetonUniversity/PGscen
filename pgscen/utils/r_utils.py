@@ -1,15 +1,15 @@
+"""Utility functions for working with distributions and models created in R."""
+
 import warnings
 import pandas as pd
 import numpy as np
 from scipy.stats import norm
-from statsmodels.distributions.empirical_distribution import ECDF
 from rpy2.robjects.packages import importr
 import rpy2.robjects as robjects
 import rpy2.robjects.numpy2ri
 rpy2.robjects.numpy2ri.activate()
 
-
-# Import R packages
+# import R packages
 base = importr('base')
 timeDate = importr('timeDate')
 Rsafd = importr('Rsafd')
@@ -18,7 +18,8 @@ qgraph = importr('qgraph')
 splines = importr('splines')
 stats = importr('stats')
 
-def point_mass(data,masspt,threshold=0.05):
+
+def point_mass(data, masspt, threshold=0.05):
     """
     Check if the input data has a point mass at a location
 
@@ -31,46 +32,7 @@ def point_mass(data,masspt,threshold=0.05):
 
     :return: true of false
     """
-    return (data==masspt).sum()/len(data)>=threshold
-
-# def gpd_tail(data,lower=0.3,upper=0.7,threshold=1):
-#     """
-#     Determine if given dataset has lower, upper, both or no tails.
-
-#     :param data: input data
-#     :type data: 1d numpy array
-#     :param lower: data samples below this percentile are considered lower tail 
-#     :type lower: float
-#     :param upper: data samples above this percentile are considered upper tail 
-#     :type upper: float
-#     :param threshold: the range of a tail need to be > threshold*std to be considered as a heavy tail 
-#     :type threshold: float
-
-#     :return: str, ``two``, ``lower``,``upper`` or ``none``
-#     """
-
-#     # Do not fit GPD if size of sample < 80
-#     if len(data) < 80:
-#         return 'none'
-
-#     # Check quantiles
-#     ql,qu = np.quantile(data,[lower,upper])
-#     std = np.std(data)
-    
-#     ll,uu = False,False
-#     if ql-np.min(data) > threshold*std:
-#         ll = True
-#     if np.max(data)-qu > threshold*std:
-#         uu = True
-    
-#     if ll and uu:
-#         return 'two'
-#     elif ll:
-#         return 'lower'
-#     elif uu:
-#         return 'upper'
-#     else:
-#         return 'none'
+    return (data == masspt).sum() / len(data) >= threshold
 
 
 def gpd_tail(data,lower=0.15,upper=0.85,bins=3,bin_threshold=3,range_threshold=0.05):
@@ -127,100 +89,6 @@ def gpd_tail(data,lower=0.15,upper=0.85,bins=3,bin_threshold=3,range_threshold=0
     else:
         return 'none'
 
-# """
-# Remove trend by fitting natural splines
-# """
-# def ns_detrend(df,ord=8,ext=0):
-    
-#     trend_df = pd.DataFrame(index=df.index)
-#     rem_df = pd.DataFrame(index=df.index)
-
-#     if ext > 0:
-#         freq = df.index[1]-df.index[0]
-#         trendextra_df = pd.DataFrame(index=pd.date_range(start=df.index[-1]+freq,periods=ext,freq=freq))
-    
-#     # Generate a Basis Matrix for Natural Cubic Splines
-#     for col in df.columns:
-#         f = robjects.Formula('y~ns(x,df=ord)')
-#         env = f.environment
-#         env['y'] = robjects.FloatVector(df[col].values)
-#         env['x'] = robjects.IntVector(range(1,df.shape[0]+1))
-#         env['ord'] = ord
-#         fit = stats.lm(f)
-        
-#         trend_df[col] = fit.rx2('fitted.values')
-#         rem_df[col] = fit.rx2('residuals')
-
-#         if ext > 0:
-#             p = stats.predict
-#             newdata = robjects.DataFrame({'x':robjects.IntVector(range(df.shape[0]+1,df.shape[0]+1+ext))})
-#             trendextra_df[col] = p(fit,newdata=newdata)
-
-#     if ext > 0:   
-#         return trend_df,trendextra_df,rem_df
-#     else:
-#         return trend_df,rem_df
-
-# """
-# Wrapper for timeDate function from {timeDate}.
-# Create a 'timeDate' object from scratch using a character vector.
-
-# :param charvec: a list of strings of dates and times.
-# :type charvec: list
-# :param format: the format specification of the input character vector.
-# :type format: str, defaluts to ''%Y-%m-%d %H:%M:%S''
-
-# :return:
-# """
-# def RtimeDate(charvec,format):
-#     f = timeDate.timeDate
-#     return f(robjects.StrVector(charvec),format=format)
-
-
-# """
-# Creates timeSeries objects
-
-# """
-# def timeSeries(positions,data):
-#     f = Rsafd.timeSeries
-#     return f(positions,robjects.FloatVector(data))
-
-
-# """
-# Decomposition of a univariate timeSeries object based on the base function stl
-# """
-# def sstl(df,freq=24,twind=0.75,format='%Y-%m-%d %H:%M:%S'):
-#     trend_df = pd.DataFrame(index=df.index,columns=df.columns)
-#     sea_df = pd.DataFrame(index=df.index,columns=df.columns)
-#     rem_df = pd.DataFrame(index=df.index,columns=df.columns)
-
-#     tt = RtimeDate(df.index.astype(str).tolist(),format)
-#     f = Rsafd.sstl
-#     for col in df.columns:
-#         series = timeSeries(positions=tt,data=df[col].values)
-#         trend,sea,rem = f(series,FREQ=freq,TWIND=twind)
-
-#         trend_df[col] = trend.slots['data']
-#         sea_df[col] = sea.slots['data']
-#         rem_df[col] = rem.slots['data']
-
-#     return trend_df,sea_df,rem_df
-
-# """
-# Wrapper for fit.gpd function
-
-# :param data: data to fit gpd
-# :type data: 1d numpy array
-# :param plot: whether to show plots of tails
-# :type plot: boolean, default to False
-
-# :return: R object stores GPD
-# """
-# def fit_gpd(data,plot=False):
-
-#     f = Rsafd.fit_gpd
-#     return f(robjects.FloatVector(data),tail=tail,plot=plot)
-
 
 def pgpd(dist,x):
     """
@@ -236,6 +104,7 @@ def pgpd(dist,x):
 
     f = Rsafd.pgpd
     return np.array(f(dist,robjects.FloatVector(x)))
+
 
 def qgpd(dist,x):
     """
@@ -294,37 +163,6 @@ def fit_dist(data):
     else:
         return stats.ecdf(robjects.FloatVector(data))
 
-    # if tail == 'none':
-    #     # No tail, fit emperical CDF
-    #     f = stats.ecdf
-    #     return f(robjects.FloatVector(data))
-    # else:
-    #     # At least one tail, fit GPD
-    #     f = Rsafd.fit_gpd
-    #     return f(robjects.FloatVector(data),tail=tail,plot=False)
-
-
-    # if gpd:
-    #     # Fit GPDs if possible
-    #     # Otherwise use emperical CDF
-
-    #     # Determine tails
-    #     tail = gpd_tail(data)
-            
-    #     # print(tail)
-    #     if tail == 'none':
-    #         # No tail, fit emperical CDF
-    #         f = stats.ecdf
-    #         return f(robjects.FloatVector(data))
-    #     else:
-    #         # At least one tail, fit GPD
-    #         f = Rsafd.fit_gpd
-    #         return f(robjects.FloatVector(data),tail=tail,plot=False)
-
-    # else:
-    #     # Fit Emperical CDF
-    #     f = stats.ecdf
-    #     return f(robjects.FloatVector(data))
 
 def pdist(dist,x):
     """
@@ -389,6 +227,7 @@ def gaussianize(df):
     unif_df.clip(lower=1e-5,upper=0.99999,inplace=True)
     gauss_df = unif_df.apply(norm.ppf)
     return dist_dict,gauss_df
+
 
 def graphical_lasso(df,m,rho):
     """
