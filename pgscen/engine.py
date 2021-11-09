@@ -55,10 +55,10 @@ class GeminiEngine(object):
         scen_timesteps : List[pd.Timestamp]
             The time points which generated scenarios will provide values for.
 
-        forecasts : Dict[pd.Series]
+        forecasts : Optiona[Dict[pd.Series]]
             The forecasted values for the scenario time window which were used
             as a basis to generate scenarios.
-        scenarios : Dict[pd.DataFrame]
+        scenarios : Optional[Dict[pd.DataFrame]]
             The scenarios generated using this engine.
 
     """
@@ -144,9 +144,9 @@ class GeminiEngine(object):
         Arguments
         ---------
             asset_rho
-                Hyper-parameter governing the covariances between assets.
+                Regularization hyper-parameter governing asset precisions.
             horizon_rho
-                Hyper-parameter governing the covariances between time points.
+                Regularization hyper-parameter governing time point precisions.
 
         """
         self.model = GeminiModel(self.scen_start_time, self.get_hist_df_dict(),
