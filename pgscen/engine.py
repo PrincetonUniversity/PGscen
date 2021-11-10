@@ -8,7 +8,7 @@ from datetime import datetime
 
 from astral import LocationInfo
 from .model import get_asset_list, GeminiModel, GeminiError
-from .utils.solar_utils import sun, overlap, get_solar_hist_dates
+from .utils.solar_utils import sun, overlap, get_solar_hist_dates, get_asset_trans_hour_info
 
 
 class GeminiEngine(ABC):
@@ -224,74 +224,153 @@ class SolarGeminiEngine(GeminiEngine):
                                        periods=self.num_of_horizons,
                                        freq=stepsize)
 
-        # Get scenario date
-        local_date = self.scen_start_time.tz_convert('US/Central').date()
-        asset_suns = {
-            site: sun(LocationInfo(site, 'Texas', 'USA', lat, lon).observer,
-                      date=local_date)
-            for site, lat, lon in zip(self.meta_df.index,
-                                      self.meta_df.latitude,
-                                      self.meta_df.longitude)
-            }
+        ################### Compute transitional hour delay time #########################
 
-        first_sunrise, last_sunrise = None, None
-        first_sunset, last_sunset = None, None
+        print('computing hour delay time....')
 
-        for s in asset_suns.values():
-            sunrise = pd.to_datetime(s['sunrise'])
-            sunset = pd.to_datetime(s['sunset'])
+        hist_dates = pd.to_datetime(solar_hist_forecast_df['Forecast_time'].\
+            dt.tz_convert('US/Central').dt.date).dt.tz_localize('US/Central').dt.tz_convert('utc').unique()
+        delay_dict = dict()
 
-            if first_sunrise is None or sunrise < first_sunrise:
-                first_sunrise = sunrise
-            if last_sunrise is None or sunrise > last_sunrise:
-                last_sunrise = sunrise
+        for asset,row in self.meta_df.iterrows():
+            lat = row['latitude']
+            lon = row['longitude']
+            loc = LocationInfo(asset,'Texas','USA',lat,lon)
 
-            if first_sunset is None or sunset < first_sunset:
-                first_sunset = sunset
-            if last_sunset is None or sunset > last_sunset:
-                last_sunset = sunset
+            act_df = solar_hist_actual_df[asset]
+            fcst_df = solar_hist_forecast_df.set_index('Forecast_time')[asset]
+            
+            sunrise_data,sunset_data = [],[]
+            for date in hist_dates:
+                trans = get_asset_trans_hour_info(loc,date)
+                
+                # Sunrise
+                sunrise_dict = trans['sunrise']
+                sunrise_time,sunrise_active,sunrise_horizon = sunrise_dict['time'],\
+                    sunrise_dict['active'],sunrise_dict['timestep']
+                act = act_df.loc[sunrise_horizon]
+                fcst = fcst_df.loc[sunrise_horizon]
+                sunrise_data.append([sunrise_time,sunrise_horizon,act,fcst,act-fcst,sunrise_active])
+                
+                # Sunset
+                sunset_dict = trans['sunset']
+                sunset_time,sunset_active,sunset_horizon = sunset_dict['time'],\
+                    sunset_dict['active'],sunset_dict['timestep']
+                act = act_df.loc[sunset_horizon]
+                fcst = fcst_df.loc[sunset_horizon]
+                sunset_data.append([sunset_time,sunset_horizon,act,fcst,act-fcst,sunset_active])
+                
+            sunrise_df = pd.DataFrame(data=sunrise_data,
+                                    columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
+            sunset_df = pd.DataFrame(data=sunset_data,
+                                    columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
+            
+            # Figure out delay times
+            for m in range(60):
+                if sunrise_df[sunrise_df['Active Minutes']==m]['Actual'].sum()>0:
+                    sunrise_delay_in_minutes = m-1
+                    break
+                    
+            for m in range(60):
+                if sunset_df[sunset_df['Active Minutes']==m]['Actual'].sum()>0:
+                    sunset_delay_in_minutes = m-1
+                    break 
+                    
+            delay_dict[asset] = {'sunrise':sunrise_delay_in_minutes,'sunset':sunset_delay_in_minutes}
+        
+        self.trans_delay = delay_dict
 
-        print('sun rise set times:')
-        print(first_sunrise, last_sunrise, first_sunset, last_sunset)
 
-        # Determine model parameters
-        sunrise_period = (first_sunrise, last_sunrise)
-        sunset_period = (first_sunset, last_sunset)
-        one_hour = pd.Timedelta(1, unit='H')
+        ################################### Compute transitional hour statistics ######################
 
-        sunrise_prms = [
-            {'asset_list': sorted(site for site, s in asset_suns.items()
-                              if (pd.to_datetime(s['sunrise'])
-                                  < (ts + pd.Timedelta(50, unit='minute')))),
-             'scenario_start_time': ts,
-             'num_of_horizons': 1 + (horizon < len(scen_timesteps) - 1),
-             'forecast_lead_hours': self.forecast_lead_hours + horizon}
-            for horizon, ts in enumerate(scen_timesteps)
-            if overlap(sunrise_period, (ts, ts + one_hour))
-            ]
+        trans_horizon_dict = {'sunrise':{},'sunset':{}}
+        trans_hist_df_dict = {'sunrise':{},'sunset':{}}
+        
+        for asset,row in self.meta_df.iterrows():
+            
+            lat = row['latitude']
+            lon = row['longitude']
+            loc = LocationInfo(asset,'Texas','USA',lat,lon)
+            
+            sunrise_delay_in_minutes = self.trans_delay[asset]['sunrise']
+            sunset_delay_in_minutes = self.trans_delay[asset]['sunset']   
 
-        sunset_prms = [
-            {'asset_list': sorted(site for site, s in asset_suns.items()
-                              if (pd.to_datetime(s['sunset'])
-                                  > (ts + pd.Timedelta(10, unit='minute')))),
-             'scenario_start_time': ts - stepsize,
-             'num_of_horizons': 1 + (horizon > 0),
-             'forecast_lead_hours': (self.forecast_lead_hours + horizon - 1)}
-            for horizon, ts in enumerate(scen_timesteps)
-            if overlap(sunset_period, (ts, ts + one_hour))
-            ]
+            ################# Get scenario date transitional hour timestep ###############
+            trans = get_asset_trans_hour_info(loc,self.scen_start_time.floor('D'),
+                                            sunrise_delay_in_minutes=sunrise_delay_in_minutes,
+                                            sunset_delay_in_minutes=sunset_delay_in_minutes)
+            
+            trans_horizon_dict['sunrise'][asset] = {'timestep':trans['sunrise']['timestep'],'active':trans['sunrise']['active']}
+            trans_horizon_dict['sunset'][asset] = {'timestep':trans['sunset']['timestep'],'active':trans['sunset']['active']}
 
-        sunrise_prms = [prms for prms in sunrise_prms if prms['asset_list']]
-        sunset_prms = [prms for prms in sunset_prms if prms['asset_list']]
 
-        # TODO: make this cleaner
-        day_horizons = [horizon for horizon, ts in enumerate(scen_timesteps)
-                        if (not overlap(sunrise_period, (ts, ts + one_hour))
-                            and not overlap(sunset_period, (ts, ts + one_hour))
-                            and last_sunrise < ts < first_sunset)]
+            ################# Get transitional hour historical data ######################
+            sunrise_data,sunset_data = [],[]
+            for date in hist_dates:
+                trans = get_asset_trans_hour_info(loc,date,
+                                                sunrise_delay_in_minutes=sunrise_delay_in_minutes,
+                                                sunset_delay_in_minutes=sunset_delay_in_minutes)
+                
+                # Sunrise
+                sunrise_dict = trans['sunrise']
+                sunrise_time,sunrise_active,sunrise_horizon = sunrise_dict['time'],\
+                    sunrise_dict['active'],sunrise_dict['timestep']
+                act = act_df.loc[sunrise_horizon]
+                fcst = fcst_df.loc[sunrise_horizon]
+                sunrise_data.append([sunrise_time,sunrise_horizon,act,fcst,act-fcst,sunrise_active])
+                
+                # Sunset
+                sunset_dict = trans['sunset']
+                sunset_time,sunset_active,sunset_horizon = sunset_dict['time'],\
+                    sunset_dict['active'],sunset_dict['timestep']
+                act = act_df.loc[sunset_horizon]
+                fcst = fcst_df.loc[sunset_horizon]
+                sunset_data.append([sunset_time,sunset_horizon,act,fcst,act-fcst,sunset_active])
+                
+            trans_hist_df_dict['sunrise'][asset] = pd.DataFrame(data=sunrise_data,
+                                    columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
+            trans_hist_df_dict['sunset'][asset] = pd.DataFrame(data=sunset_data,
+                                    columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
+        
+
+        self.trans_horizon = trans_horizon_dict
+        self.trans_hist_data = trans_hist_df_dict
+
+
+        ######################### Determine model parameters #############################
+        sunrise_trans_timestep = sorted(set(self.trans_horizon['sunrise'][asset]['timestep'] for asset in self.trans_horizon['sunrise']))
+        sunset_trans_timestep = sorted(set(self.trans_horizon['sunset'][asset]['timestep'] for asset in self.trans_horizon['sunset']))
+
+        one_hour = pd.Timedelta(1,unit='H')
+
+        sunrise_prms = []
+        for timestep in sunrise_trans_timestep:
+            forecast_lead_hours = self.forecast_lead_hours+int((timestep-self.scen_start_time)/one_hour)
+            asset_list = [asset for asset in self.trans_horizon['sunrise'] 
+                if self.trans_horizon['sunrise'][asset]['timestep']==timestep]
+            if sunrise_prms:
+                asset_list += sunrise_prms[-1]['asset_list']
+            sunrise_prms.append({'scenario_start_time':timestep,
+                'num_of_horizons':2,
+                'forecast_lead_hours':forecast_lead_hours,
+                'asset_list':sorted(asset_list)})  
+
+        sunset_prms = []
+        for timestep in sunset_trans_timestep:
+            forecast_lead_hours = self.forecast_lead_hours+int((timestep-self.scen_start_time)/one_hour)-1
+            asset_list = [asset for asset in self.trans_horizon['sunset'] 
+                if self.trans_horizon['sunset'][asset]['timestep']==timestep]
+            if sunset_prms:
+                asset_list += sunset_prms[-1]['asset_list']
+            sunset_prms.append({'scenario_start_time':timestep-stepsize,
+                'num_of_horizons':2,
+                'forecast_lead_hours':forecast_lead_hours,
+                'asset_list':sorted(asset_list)})  
+        
+        day_horizons = [horizon for horizon, ts in enumerate(self.scen_timesteps) 
+            if (ts > max(sunrise_trans_timestep) and ts < min(sunset_trans_timestep))]
         day_lead_hours = self.forecast_lead_hours + day_horizons[0]
 
-        ################# Determine conditional models ########################
         self.gemini_dict = {
             'day': {'asset_list': self.asset_list,
                     'scenario_start_time': scen_timesteps[day_horizons[0]],
@@ -326,6 +405,9 @@ class SolarGeminiEngine(GeminiEngine):
 
         self.cond_count = cond_indx
         self.asset_distance_mat = self.asset_distance()
+
+        print('done initializing....')
+
 
     def fit_solar_model(self, hist_start='2017-01-01',hist_end='2018-12-31'):
         """Fit solar models with chosen parameters"""
@@ -538,7 +620,8 @@ class SolarGeminiEngine(GeminiEngine):
         for mdl in ['day'] + [('cond', i) for i in range(self.cond_count)]:
             solar_md = self.gemini_dict[mdl]['gemini_model']
             solar_md.get_forecast(forecast_df)
-            solar_md.fit_conditional_gpd('solar', positive_actual=True)
+            # solar_md.fit_conditional_gpd('solar', positive_actual=True)
+            solar_md.fit_solar_conditional_gpd(self.trans_horizon, self.trans_hist_data)
 
             if self.gemini_dict[mdl]['conditional_model']:
                 cond_md = self.gemini_dict[mdl]['conditional_model']

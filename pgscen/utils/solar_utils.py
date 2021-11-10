@@ -110,6 +110,31 @@ def get_solar_hist_dates(date, meta_df, hist_start, hist_end,
             for hist_time, hist_stat in hist_stats.iteritems() if hist_stat}
 
 
+def get_asset_trans_hour_info(loc,date,sunrise_delay_in_minutes=0,sunset_delay_in_minutes=0):
+    """
+    Get asset sunrise and sunset horizon and fraction
+    """
+    sunrise_delay_time = pd.Timedelta(sunrise_delay_in_minutes,unit='min')
+    sunset_delay_time = pd.Timedelta(sunset_delay_in_minutes,unit='min')
+    
+    s = sun(loc.observer,date=date)
+        
+    # Sunrise
+    sunrise_time = pd.to_datetime(s['sunrise'])
+    sunrise_timestep = (sunrise_time+sunrise_delay_time).floor('H')
+    sunrise_active_min = s['sunrise'].minute+sunrise_delay_in_minutes
+    sunrise_active_min = 60-sunrise_active_min%60
+
+
+    # Sunset
+    sunset_time = pd.to_datetime(s['sunset'])
+    sunset_timestep = (sunset_time-sunset_delay_time).floor('H')
+    sunset_active_min = (s['sunset'].minute-sunset_delay_in_minutes)%60
+    
+    return {'sunrise':{'time':sunrise_time,'timestep':sunrise_timestep,'active':sunrise_active_min},
+            'sunset':{'time':sunset_time,'timestep':sunset_timestep,'active':sunset_active_min}}
+
+
 # def get_hist_dates(scen_start_time,start,end,meta_df,sun='both',range_in_seconds=900):
 #     """
 #     Find historical dates of solar assets based on the following criteria:
