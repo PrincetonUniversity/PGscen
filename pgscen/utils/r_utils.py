@@ -120,7 +120,7 @@ def qgpd(dist,x):
     
     try:
         # Compute quantiles using Rsafd function qgpd
-        return np.array(f(dist,robjects.FloatVector(x)))
+        return np.array(Rsafd.qgpd(dist,robjects.FloatVector(x)))
 
     except:
         # Compute quantiles using PDF
