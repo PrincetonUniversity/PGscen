@@ -13,7 +13,7 @@ setuptools.setup(
     author='Xinshuo Yang',
     author_email='xy3134@princeton.edu',
 
-    packages=['pgscen', 'pgscen.utils'],
+    packages=['pgscen', 'pgscen.utils', 'pgscen.rts_gmlc'],
     package_data={'pgscen': ['../test/resources/*.p.gz']},
 
     entry_points={
