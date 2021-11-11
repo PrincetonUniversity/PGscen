@@ -228,8 +228,8 @@ class SolarGeminiEngine(GeminiEngine):
 
         print('computing hour delay time....')
 
-        hist_dates = pd.to_datetime(solar_hist_forecast_df['Forecast_time'].\
-            dt.tz_convert('US/Central').dt.date).dt.tz_localize('US/Central').dt.tz_convert('utc').unique()
+        hist_dates = solar_hist_forecast_df.groupby('Issue_time').head(1)['Forecast_time'].tolist()
+
         delay_dict = dict()
 
         for asset,row in self.meta_df.iterrows():
@@ -284,7 +284,6 @@ class SolarGeminiEngine(GeminiEngine):
         ################################### Compute transitional hour statistics ######################
 
         trans_horizon_dict = {'sunrise':{},'sunset':{}}
-        trans_hist_df_dict = {'sunrise':{},'sunset':{}}
         
         for asset,row in self.meta_df.iterrows():
             
@@ -303,43 +302,14 @@ class SolarGeminiEngine(GeminiEngine):
             trans_horizon_dict['sunrise'][asset] = {'timestep':trans['sunrise']['timestep'],'active':trans['sunrise']['active']}
             trans_horizon_dict['sunset'][asset] = {'timestep':trans['sunset']['timestep'],'active':trans['sunset']['active']}
 
-
-            ################# Get transitional hour historical data ######################
-            sunrise_data,sunset_data = [],[]
-            for date in hist_dates:
-                trans = get_asset_trans_hour_info(loc,date,
-                                                sunrise_delay_in_minutes=sunrise_delay_in_minutes,
-                                                sunset_delay_in_minutes=sunset_delay_in_minutes)
-                
-                # Sunrise
-                sunrise_dict = trans['sunrise']
-                sunrise_time,sunrise_active,sunrise_horizon = sunrise_dict['time'],\
-                    sunrise_dict['active'],sunrise_dict['timestep']
-                act = act_df.loc[sunrise_horizon]
-                fcst = fcst_df.loc[sunrise_horizon]
-                sunrise_data.append([sunrise_time,sunrise_horizon,act,fcst,act-fcst,sunrise_active])
-                
-                # Sunset
-                sunset_dict = trans['sunset']
-                sunset_time,sunset_active,sunset_horizon = sunset_dict['time'],\
-                    sunset_dict['active'],sunset_dict['timestep']
-                act = act_df.loc[sunset_horizon]
-                fcst = fcst_df.loc[sunset_horizon]
-                sunset_data.append([sunset_time,sunset_horizon,act,fcst,act-fcst,sunset_active])
-                
-            trans_hist_df_dict['sunrise'][asset] = pd.DataFrame(data=sunrise_data,
-                                    columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
-            trans_hist_df_dict['sunset'][asset] = pd.DataFrame(data=sunset_data,
-                                    columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
-        
-
         self.trans_horizon = trans_horizon_dict
-        self.trans_hist_data = trans_hist_df_dict
 
 
         ######################### Determine model parameters #############################
-        sunrise_trans_timestep = sorted(set(self.trans_horizon['sunrise'][asset]['timestep'] for asset in self.trans_horizon['sunrise']))
-        sunset_trans_timestep = sorted(set(self.trans_horizon['sunset'][asset]['timestep'] for asset in self.trans_horizon['sunset']))
+        sunrise_trans_timestep = sorted(set(self.trans_horizon['sunrise'][asset]['timestep']
+            for asset in self.trans_horizon['sunrise']))
+        sunset_trans_timestep = sorted(set(self.trans_horizon['sunset'][asset]['timestep'] 
+            for asset in self.trans_horizon['sunset']),reverse=True)
 
         one_hour = pd.Timedelta(1,unit='H')
 
@@ -365,7 +335,8 @@ class SolarGeminiEngine(GeminiEngine):
             sunset_prms.append({'scenario_start_time':timestep-stepsize,
                 'num_of_horizons':2,
                 'forecast_lead_hours':forecast_lead_hours,
-                'asset_list':sorted(asset_list)})  
+                'asset_list':sorted(asset_list)})
+        sunset_prms.reverse()
         
         day_horizons = [horizon for horizon, ts in enumerate(self.scen_timesteps) 
             if (ts > max(sunrise_trans_timestep) and ts < min(sunset_trans_timestep))]
@@ -620,8 +591,7 @@ class SolarGeminiEngine(GeminiEngine):
         for mdl in ['day'] + [('cond', i) for i in range(self.cond_count)]:
             solar_md = self.gemini_dict[mdl]['gemini_model']
             solar_md.get_forecast(forecast_df)
-            # solar_md.fit_conditional_gpd('solar', positive_actual=True)
-            solar_md.fit_solar_conditional_gpd(self.trans_horizon, self.trans_hist_data)
+            solar_md.fit_solar_conditional_gpd(self.trans_horizon)
 
             if self.gemini_dict[mdl]['conditional_model']:
                 cond_md = self.gemini_dict[mdl]['conditional_model']
@@ -719,7 +689,7 @@ class SolarGeminiEngine(GeminiEngine):
         membership = self.meta_df.groupby('Zone').groups
         solar_md = self.gemini_dict['day']['solar_model']
         solar_md.get_forecast(solar_forecast_df)
-        solar_md.fit_conditional_gpd('solar', positive_actual=True)
+        solar_md.fit_solar_conditional_gpd(self.trans_horizon)
 
         solar_joint_scen_df.columns = pd.MultiIndex.from_tuples(
             [(zone[6:], horizon)
@@ -742,7 +712,7 @@ class SolarGeminiEngine(GeminiEngine):
         for i in range(self.cond_count):
             solar_md = self.gemini_dict['cond', i]['solar_model']
             solar_md.get_forecast(solar_forecast_df)
-            solar_md.fit_conditional_gpd('solar', positive_actual=True)
+            solar_md.fit_solar_conditional_gpd(self.trans_horizon)
 
             cond_md = self.gemini_dict['cond', i]['conditional_model']
             cond_solar_md = self.gemini_dict[cond_md]['solar_model']

@@ -211,81 +211,39 @@ class GeminiModel(object):
 
         self.forecasts = use_forecasts.unstack()
 
-    def fit_conditional_gpd(self, asset_type, bin_width_ratio=0.05,
-                            min_sample_size=200, positive_actual=False):
+    def fit_conditional_gpd(self, asset_type, bin_width_ratio=0.05, min_sample_size=200):
         """
         Fit conditional GPD
         """
+        assert asset_type == 'load' or asset_type == 'wind'
+
         self.conditional_gpd_dict = {}
         for asset in self.asset_list:
             asset_df = self.deviation_dict[asset]
-
-            if positive_actual:
-                asset_df = asset_df[asset_df['Actual'] > 0.]
-
             fcst_min = asset_df['Forecast'].min()
             fcst_max = asset_df['Forecast'].max()
 
             for timestep in self.scen_timesteps:
                 fcst = self.forecasts[asset, timestep]
 
-                if asset_type == 'load' or asset_type == 'wind':
-                    lower = max(fcst_min,
-                                fcst - bin_width_ratio * (fcst_max - fcst_min))
-                    upper = min(fcst_max,
-                                fcst + bin_width_ratio * (fcst_max - fcst_min))
+                lower = max(fcst_min,
+                            fcst - bin_width_ratio * (fcst_max - fcst_min))
+                upper = min(fcst_max,
+                            fcst + bin_width_ratio * (fcst_max - fcst_min))
 
-                    selected_df = asset_df[(asset_df['Forecast'] >= lower)
-                                           & (asset_df['Forecast'] <= upper)]
+                selected_df = asset_df[(asset_df['Forecast'] >= lower)
+                                        & (asset_df['Forecast'] <= upper)]
+                data = np.ascontiguousarray(
+                    selected_df['Deviation'].values)
+
+                if len(data) < min_sample_size:
+                    # If binning data on forecast has < 200 samples, use
+                    # the nearest data ponts as samples
+                    idx = (asset_df.sort_values(
+                        'Forecast') - fcst).abs().sort_values(
+                        'Forecast').index[0:min_sample_size]
                     data = np.ascontiguousarray(
-                        selected_df['Deviation'].values)
-
-                    if len(data) < min_sample_size:
-                        # If binning data on forecast has < 200 samples, use
-                        # the nearest data ponts as samples
-                        idx = (asset_df.sort_values(
-                            'Forecast') - fcst).abs().sort_values(
-                            'Forecast').index[0:min_sample_size]
-                        data = np.ascontiguousarray(
-                            asset_df.loc[idx, 'Deviation'].values)
-
-                elif asset_type == 'solar':
-                    hist_dev_data = get_ecdf_data(
-                        self.gpd_dict[asset, timestep])
-                    hist_dev_range = np.max(
-                        hist_dev_data) - np.min(hist_dev_data)
-
-                    if (fcst <= 0.15 * fcst_max
-                            and hist_dev_range <= 0.15 * fcst_max):
-                        data = np.ascontiguousarray(hist_dev_data)
-
-                    else:
-                        # Otherwise take fcst +/- 5% bin
-                        lower = max(fcst_min, fcst - bin_width_ratio * (
-                                    fcst_max - fcst_min))
-                        upper = min(fcst_max, fcst + bin_width_ratio * (
-                                    fcst_max - fcst_min))
-
-                        selected_df = asset_df[(asset_df['Forecast'] >= lower)
-                                               & (asset_df['Forecast']
-                                                  <= upper)]
-
-                        data = np.ascontiguousarray(
-                            selected_df['Deviation'].values)
-
-                        if len(data) < min_sample_size:
-                            # If binning data on forecast has < 200 samples,
-                            # use the nearest data ponts as samples
-                            idx = (asset_df.sort_values(
-                                'Forecast') - fcst).abs().sort_values(
-                                'Forecast').index[0:min_sample_size]
-                            data = np.ascontiguousarray(
-                                asset_df.loc[idx, 'Deviation'].values)
-
-                else:
-                    raise RuntimeError(f'Unrecognizable asset_type '
-                                       f'{asset_type}, must be one of load, '
-                                       f'solar or wind')
+                        asset_df.loc[idx, 'Deviation'].values)
 
                 try:
                     self.conditional_gpd_dict[asset, timestep] = fit_dist(data)
@@ -294,8 +252,7 @@ class GeminiModel(object):
                     raise RuntimeError(
                         f'Debugging: unable to fit gpd for {asset} {timestep}')
 
-    def fit_solar_conditional_gpd(self, trans_horizon, trans_hist_data,
-                                  bin_width_ratio=0.05, min_sample_size=200):
+    def fit_solar_conditional_gpd(self, trans_horizon, bin_width_ratio=0.05, min_sample_size=200):
         """
         Fit solar conditional GPD 
         """
@@ -304,25 +261,9 @@ class GeminiModel(object):
 
         for asset in self.asset_list:
             print(asset)
-            
-            # Prepare sunrise data
+
             sunrise_timestep = trans_horizon['sunrise'][asset]['timestep']
-            sunrise_active = trans_horizon['sunrise'][asset]['active']
-                        
-            lower = max(0,sunrise_active-int(bin_width_ratio*60))
-            upper = min(60,sunrise_active+int(bin_width_ratio*60))            
-            hist_df = trans_hist_data['sunrise'][asset]
-            sunrise_hist_df = hist_df[(hist_df['Active Minutes'] >= lower)
-                                & (hist_df['Active Minutes'] <= upper)]
-            
-            # Prepare sunset data
             sunset_timestep = trans_horizon['sunset'][asset]['timestep']
-            sunset_active = trans_horizon['sunset'][asset]['active']
-            lower = max(0,sunset_active-int(bin_width_ratio*60))
-            upper = min(60,sunset_active+int(bin_width_ratio*60))            
-            hist_df = trans_hist_data['sunset'][asset]
-            sunset_hist_df = hist_df[(hist_df['Active Minutes'] >= lower)
-                                & (hist_df['Active Minutes'] <= upper)]
             
             # Data for other horizons
             asset_df = self.deviation_dict[asset]
@@ -332,16 +273,13 @@ class GeminiModel(object):
             fcst_min = asset_df['Forecast'].min()
             fcst_max = asset_df['Forecast'].max()
 
-            for timestep in self.scen_timesteps:
-                
-                if timestep == sunrise_timestep:
-                    data = np.ascontiguousarray(
-                        sunrise_hist_df['Deviation'].values)                
-                elif timestep == sunset_timestep:
-                    data = np.ascontiguousarray(
-                        sunset_hist_df['Deviation'].values)                
+            for timestep in self.scen_timesteps:   
+                  
+                if timestep == sunrise_timestep or timestep == sunset_timestep:
+                    # Use train data
+                    data = np.ascontiguousarray(get_ecdf_data(self.gpd_dict[asset, timestep]))         
                 else:
-                    # take fcst +/- 5% bin
+                    # Take fcst +/- 5% bin
                     fcst = self.forecasts[asset, timestep]
                     lower = max(fcst_min, fcst - bin_width_ratio * (
                                     fcst_max - fcst_min))
