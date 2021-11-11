@@ -22,6 +22,8 @@ setuptools.setup(
             'pgscen-wind=pgscen.command_line:run_wind',
             'pgscen-solar=pgscen.command_line:run_solar',
             'pgscen-load-solar=pgscen.command_line:run_load_solar_joint',
+
+            'pgscen-rts=pgscen.rts_gmlc.command_line:run_rts',
             ],
         },
 
