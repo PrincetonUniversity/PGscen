@@ -22,6 +22,8 @@ def run_rts():
 
     parser.add_argument('rts_dir', type=str,
                         help="where RTS-GMLC repository is stored")
+    parser.add_argument('--csv', action='store_true',
+                        help="store output in .csv format instead of .p.gz")
 
     args = parser.parse_args()
     start = ' '.join([args.start, "08:00:00"])
@@ -82,6 +84,10 @@ def run_rts():
         ge.fit(dist / (10 * dist.max()), 5e-2)
         ge.create_scenario(args.scenario_count, wind_site_forecast_futures)
 
+        if args.csv:
+            ge.write_to_csv(args.out_dir, wind_site_actual_futures,
+                            write_forecasts=True)
+
         se = SolarGeminiEngine(solar_site_actual_hists,
                                solar_site_forecast_hists,
                                scenario_start_time, solar_meta_df,
@@ -96,11 +102,17 @@ def run_rts():
                                             load_zone_forecast_futures,
                                             solar_site_forecast_futures)
 
-        with bz2.BZ2File(out_fl, 'w') as f:
-            pickle.dump({'Wind': ge.scenarios['wind'].round(4),
-                         'Load': se.scenarios['load'].round(4),
-                         'Solar': se.scenarios['solar'].round(4)},
-                        f, protocol=-1)
+        if args.csv:
+            se.write_to_csv(args.out_dir, {'load': load_zone_actual_futures,
+                                           'solar': solar_site_actual_futures},
+                            write_forecasts=True)
+
+        else:
+            with bz2.BZ2File(out_fl, 'w') as f:
+                pickle.dump({'Wind': ge.scenarios['wind'].round(4),
+                             'Load': se.scenarios['load'].round(4),
+                             'Solar': se.scenarios['solar'].round(4)},
+                            f, protocol=-1)
 
     if args.verbose >= 2:
         if args.days == 1:

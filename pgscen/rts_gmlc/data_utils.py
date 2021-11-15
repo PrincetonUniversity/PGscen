@@ -1,3 +1,4 @@
+"""Utility functions for loading and parsing RTS-GMLC input datasets."""
 
 from pathlib import Path
 import pandas as pd

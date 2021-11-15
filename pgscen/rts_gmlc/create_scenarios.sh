@@ -7,8 +7,16 @@
 # the year are partitioned into blocks, and each block is run in parallel
 # on its own compute node.
 #
+# Note that this script can be run directly on the command line (ideally using
+# an interactive compute node instead of a head node) or submitted as a Slurm
+# task in its own right — see the example usages listed below.
+#
 # Arguments:
 #   -i  The directory where the RTS-GMLC repository has been checked out.
+#       This can be e.g. where the repo https://github.com/GridMod/RTS-GMLC
+#       was checked out; alternatively, once can use the
+#       downloads/rts_gmlc/RTS-GMLC subdirectory created in Prescient once the
+#       prescient/downloaders/rts_gmlc.py script has been run.
 #   -o  The directory where output files should be stored. This directory must
 #       already exist; any existing scenario files within it will NOT be
 #       overwritten.
@@ -19,15 +27,23 @@
 #       of 100-200 are reasonable if there are a lot of idle nodes and you
 #       want scenarios generated quickly, whereas runtimes of 500-800 are
 #       more suitable for having this pipeline run overnight.
+#   -c  Optional argument which turns on saving output scenarios in the original
+#       PGscen .csv output format. By default, scenarios are saved as compressed
+#       pickle objects containing output for all assets for each day; otherwise,
+#       a directory is created for each day which will contain .csv files for
+#       each asset in the corresponding "load", "wind", or "solar" subdirectory.
 #
 # Example usages:
 #   sh create_scenarios.sh -i <data-dir>/RTS-GMLC -o <scratch-dir>/rts_scens \
 #                          -n 1000 -m 150
 #
+#   sh create_scenarios.sh -i <data-dir>/RTS-GMLC -o <scratch-dir>/rts_scens \
+#                          -n 500 -m 400 -c
+#
 #   sbatch --output=<scratch-dir>/slurm-logs/scen-pipeline.out \
 #          --error=<scratch-dir>/slurm-logs/scen-pipeline.err \
 #          repos/PGscen/pgscen/rts_gmlc/create_scenarios.sh \
-#          -i <data-dir>/RTS-GMLC -o <scratch-dir>/rts-scens_4k -n 4000 -m 800
+#             -i <data-dir>/RTS-GMLC -o <scratch-dir>/rts-scens_4k -n 4000 -m 800
 
 #SBATCH --job-name=create_rts-scens
 #SBATCH --cpus-per-task=1
@@ -35,18 +51,18 @@
 #SBATCH --time=100
 
 
-module purge
-module load anaconda3/2021.5
-conda activate pgscen
+# default command line argument values
+csv_str=""
 
 # collect command line arguments
-while getopts i:o:n:m: var
+while getopts :i:o:n:m:c var
 do
 	case "$var" in
 	  i)  in_dir=$OPTARG;;
 	  o)  out_dir=$OPTARG;;
 	  n)  scen_count=$OPTARG;;
 	  m)  min_limit=$OPTARG;;
+	  c)  csv_str="--csv";;
 	  [?])  echo "Usage: $0 " \
 	      "[-i] input directory" \
 	      "[-o] output directory" \
@@ -56,6 +72,9 @@ do
 	esac
 done
 
+module purge
+module load anaconda3/2021.5
+conda activate pgscen
 
 # run time trials using five randomly chosen days
 run_times=()
@@ -64,7 +83,7 @@ do
   use_date=$( date -d "2020-01-01 + $rand day" '+%Y-%m-%d' )
 
   start_time=$(date +%s)
-  pgscen-rts $use_date 1 $in_dir -o $out_dir -n $scen_count -v
+  pgscen-rts $use_date 1 $in_dir -o $out_dir -n $scen_count $csv_str -v
   end_time=$(date +%s)
 
   run_times+=($( echo "$end_time - $start_time" | bc ))
@@ -87,6 +106,7 @@ use_time=$( printf %.0f $( bc <<< "$task_days * $day_time * 1.13 / 60" ))
 # chunk using its own Slurm job
 day_jobs=()
 fmt_str='+%Y-%m-%d'
+echo "Submitting $ntasks scenario generation jobs..."
 
 for i in $( seq 1 $ntasks );
 do
@@ -94,7 +114,8 @@ do
 
   day_jobs+=($( sbatch --job-name=rts-scens --time=$use_time --mem-per-cpu=4G \
                        --wrap=" pgscen-rts $day_str $task_days \
-                                           $in_dir -o $out_dir -n $scen_count -v " \
+                                           $in_dir -o $out_dir -n $scen_count \
+                                           $csv_str -v " \
                        --parsable \
                        --output=$out_dir/slurm_${day_str}.out \
                        --error=$out_dir/slurm_${day_str}.err ))
