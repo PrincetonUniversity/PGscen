@@ -334,7 +334,7 @@ class GeminiModel(object):
     def fit_conditional_gpd(self,
                             asset_type: str, bin_width_ratio: float = 0.05,
                             min_sample_size: int = 200,
-                            positive_actual: bool = False):
+                            positive_actual: bool = False) -> None:
         """
         This function fits a conditional GPD using the historical deviations
         for time points whose forecasted values are similar to the forecasted
@@ -440,12 +440,13 @@ class GeminiModel(object):
                     raise RuntimeError(
                         f'Debugging: unable to fit gpd for {asset} {timestep}')
 
-    def generate_gauss_scenarios(self,
-                                 nscen: int,
-                                 sqrt_cov: Optional[np.array] = None,
-                                 mu: Optional[np.array] = None,
-                                 lower_dict: Optional[pd.Series] = None,
-                                 upper_dict: Optional[pd.Series] = None):
+    def generate_gauss_scenarios(
+            self,
+            nscen: int, sqrt_cov: Optional[np.array] = None,
+            mu: Optional[np.array] = None,
+            lower_dict: Optional[pd.Series] = None,
+            upper_dict: Optional[pd.Series] = None
+            ) -> None:
         """
         Generate conditional or unconditional Gaussian scenarios.
 
