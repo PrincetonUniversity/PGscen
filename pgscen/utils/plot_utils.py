@@ -3,7 +3,7 @@ import seaborn as sns
 from scipy.spatial import distance
 from scipy.cluster.hierarchy import linkage, dendrogram
 
-cov_cmap = sns.diverging_palette(3, 237, s=81, l=43, sep=3, as_cmap=True)
+cov_cmap = sns.diverging_palette(3, 237, s=81, l=43, sep=41, as_cmap=True)
 
 
 def get_clustermat(cov_mat):
