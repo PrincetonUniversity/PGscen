@@ -684,7 +684,7 @@ class SolarGeminiEngine(GeminiEngine):
             self.solar_zone_std = solar_zone_gauss_df_std
 
         else:
-            solar_gauss_df = pd.DataFrame({
+            solar_zone_gauss_df = pd.DataFrame({
                 ('_'.join(['Solar', site]), horizon): solar_md.gauss_df[
                     (site, horizon)]
                 for site in self.asset_list
@@ -694,7 +694,7 @@ class SolarGeminiEngine(GeminiEngine):
         # create and fit a joint load-solar model for the day time
         joint_md = GeminiModel(
             self.gemini_dict['day']['scen_start_time'], None,
-            load_gauss_df.merge(solar_gauss_df, how='inner',
+            load_gauss_df.merge(solar_zone_gauss_df, how='inner',
                                 left_index=True, right_index=True),
             None, self.forecast_resolution_in_minute,
             self.gemini_dict['day']['num_of_horizons'],

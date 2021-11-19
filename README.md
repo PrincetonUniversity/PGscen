@@ -5,8 +5,16 @@ This package generates power grid scenarios using GEMINI trained on historical g
 
 ## Installation ##
 
+To install PGscen, first clone this repository at the latest release:
 
-## Running PGscen ##
+```git clone https://github.com/PrincetonUniversity/PGscen.git --branch v0.2.0-a0 --single-branch```
+
+Then navigate to the cloned directory and run:
+
+```pip install .```
+
+
+## Running PGscen on Taxas 7k ##
 
 Once installed, you can generate scenarios using the NREL/ERCOT datasets for the Texas 7k system installed as part of
 the package. This is easiest done using the command line interface made available upon installation.
