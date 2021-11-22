@@ -1,3 +1,4 @@
+"""Implementations of graphical LASSO models for use in scenario generation."""
 
 import numpy as np
 import pandas as pd
