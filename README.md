@@ -14,6 +14,7 @@ Next, navigate to the cloned directory to create and activate the conda environm
 packages for PGscen:
 
 ```conda env create -f environment.yml```
+
 ```conda activate pgscen```
 
 From within the same directory, complete installation of PGscen by running:
@@ -34,7 +35,7 @@ are influenced by the same factors, and especially the weather.
 The interface for all four of these tools is the same, with two required arguments:
  - `start`: The starting date for scenario generation, given in YYYY-MM-DD format. Currently supported dates are
             2017-01-03 to 2018-12-30 for load, load-solar, and solar scenarios, and 2018-01-01 to 2018-12-30 for wind
-            scenarios.
+            scenarios, all inclusive.
  - `days`: The number of days to create scenarios for. Note that the implied date range must also fall in the intervals
            listed above for `start`.
 
@@ -58,3 +59,25 @@ Example usages include:
 `pgscen-wind 2018-07-05 3 -n 2000`
 
 `pgscen-solar 2017-09-22 1 -n 500 -vv`
+
+
+## Running PGscen on RTS-GMLC ##
+
+PGscen also includes a beta version of the `pgscen-rts` command line tool for generating scenarios for the RTS-GMLC
+power grid system. The data for this system is not included with the package but can be acquired by cloning the RTS-GMLC
+repository:
+
+```git clone https://github.com/GridMod/RTS-GMLC.git```
+
+The interface for `pgscen-rts` is identical to that of its Texas 7k counterparts, with the exception of having to
+specify the directory where the RTS-GMLC dataset is located. For example, if you have a directory called `repositories`
+within which you cloned the RTS-GMLC repo, you would run:
+
+`pgscen-rts 2020-04-03 4 repositories/RTS-GMLC`
+
+Note that this tool creates both joint load-solar and wind scenarios in one run; it also saves output as a single
+compressed Python pickle object for each day unless the `--csv` flag is given, in which case it reverts to the original
+format used by the Texas 7k tools. `pgscen-rts` supports any day from 2020-01-01 to 2020-12-31 inclusive.
+
+Please see `pgscen/rts_gmlc/create_scenarios.sh` for an example of how this tool can be used to generate RTS-GMLC
+scenarios for the entire year using a Slurm compute cluster.

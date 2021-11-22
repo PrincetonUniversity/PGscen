@@ -7,14 +7,16 @@ from pathlib import Path
 
 setuptools.setup(
     name='pgscen',
-    version='0.2.0-a1',
+    version='0.2.0-rc.1',
     description="power grid scenario creation platform for "
                 "load and production of wind and solar",
     author='Xinshuo Yang',
     author_email='xy3134@princeton.edu',
 
     packages=['pgscen', 'pgscen.utils', 'pgscen.rts_gmlc'],
-    package_data={'pgscen': ['../test/resources/*.p.gz']},
+    package_data={'pgscen': ['../test/resources/*.p.gz',
+                             '../data/*/*/*/*.csv',
+                             '../data/MetaData/*.xlsx']},
 
     entry_points={
         'console_scripts': [
