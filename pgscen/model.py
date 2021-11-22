@@ -385,7 +385,6 @@ class GeminiModel(object):
                     data = np.ascontiguousarray(
                         selected_df['Deviation'].values)
 
-
                     if len(data) < min_sample_size:
                         idx = (asset_df.sort_values(
                             'Forecast') - fcst).abs().sort_values(

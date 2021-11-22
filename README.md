@@ -1,15 +1,22 @@
 # PGscen #
 
 This package generates power grid scenarios using GEMINI trained on historical grid asset actual and forecasted values.
+Please see the Jupyter notebooks available in the `examples/` directory for an overview of how PGscen works.
 
 
 ## Installation ##
 
 To install PGscen, first clone this repository at the latest release:
 
-```git clone https://github.com/PrincetonUniversity/PGscen.git --branch v0.2.0-a0 --single-branch```
+```git clone https://github.com/PrincetonUniversity/PGscen.git --branch v0.2.0-a1 --single-branch```
 
-Then navigate to the cloned directory and run:
+Next, navigate to the cloned directory to create and activate the conda environment containing the prerequisite
+packages for PGscen:
+
+```conda env create -f environment.yml```
+```conda activate pgscen```
+
+From within the same directory, complete installation of PGscen by running:
 
 ```pip install .```
 
