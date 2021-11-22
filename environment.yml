@@ -17,6 +17,7 @@ dependencies:
   - h5py
   - geopandas
   - shapely
+  - ipywidgets
   - r-essentials=4.0
   - r-glasso
   - r-qgraph
