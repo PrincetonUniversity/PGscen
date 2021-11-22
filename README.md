@@ -8,7 +8,7 @@ Please see the Jupyter notebooks available in the `examples/` directory for an o
 
 To install PGscen, first clone this repository at the latest release:
 
-```git clone https://github.com/PrincetonUniversity/PGscen.git --branch v0.2.0-rc.1 --single-branch```
+```git clone https://github.com/PrincetonUniversity/PGscen.git --branch v0.2.0-rc.2 --single-branch```
 
 Next, navigate to the cloned directory to create and activate the conda environment containing the prerequisite
 packages for PGscen:
@@ -60,7 +60,7 @@ Example usages include:
 
 `pgscen-solar 2017-09-22 1 -n 500 -vv`
 
-The implementations of these command line interfaces is located at `pgscen/command_line.py`, and can be used as
+The implementations of these command line interfaces are located at `pgscen/command_line.py`, and can be used as
 templates for designing your own PGscen workflows. See for example `pgscen/rts_gmlc/command_line.py` for one such custom
 implementation which is described in greater detail below.
 
