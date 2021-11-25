@@ -52,16 +52,20 @@
 
 
 # default command line argument values
+opt_str=""
+scen_cmd="pgscen-rts"
 csv_str=""
 
 # collect command line arguments
-while getopts :i:o:n:m:c var
+while getopts :i:o:n:m:a:jc var
 do
 	case "$var" in
 	  i)  in_dir=$OPTARG;;
 	  o)  out_dir=$OPTARG;;
 	  n)  scen_count=$OPTARG;;
 	  m)  min_limit=$OPTARG;;
+	  a)  opt_str=$OPTARG;;
+	  j)  scen_cmd="pgscen-rts-joint";;
 	  c)  csv_str="--csv";;
 	  [?])  echo "Usage: $0 " \
 	      "[-i] input directory" \
@@ -71,6 +75,12 @@ do
 			exit 1;;
 	esac
 done
+
+if [ ! -d "$out_dir" ];
+then
+  echo "given output directory does not exist, create it before running this pipeline!"
+  exit 1
+fi
 
 module purge
 module load anaconda3/2021.5
@@ -83,7 +93,7 @@ do
   use_date=$( date -d "2020-01-01 + $rand day" '+%Y-%m-%d' )
 
   start_time=$(date +%s)
-  pgscen-rts $use_date 1 $in_dir -o $out_dir -n $scen_count $csv_str -v
+  eval "$scen_cmd $use_date 1 $in_dir -o $out_dir -n $scen_count $csv_str -v"
   end_time=$(date +%s)
 
   run_times+=($( echo "$end_time - $start_time" | bc ))
@@ -112,10 +122,10 @@ for i in $( seq 1 $ntasks );
 do
   day_str=$( date -d "2020-01-01 + $(( (i - 1) * task_days )) day" $fmt_str )
 
-  day_jobs+=($( sbatch --job-name=rts-scens --time=$use_time --mem-per-cpu=4G \
-                       --wrap=" pgscen-rts $day_str $task_days \
-                                           $in_dir -o $out_dir -n $scen_count \
-                                           $csv_str -v " \
+  day_jobs+=($( sbatch --job-name=rts-scens --time=$use_time $opt_str --mem-per-cpu=2G \
+                       --wrap=" $scen_cmd $day_str $task_days \
+                                          $in_dir -o $out_dir -n $scen_count \
+                                          $csv_str -v " \
                        --parsable \
                        --output=$out_dir/slurm_${day_str}.out \
                        --error=$out_dir/slurm_${day_str}.err ))
