@@ -95,7 +95,6 @@ class PCAGeminiModel(GeminiModel):
             
         pca = PCA(n_components=num_of_components, svd_solver='full')
         Y = pca.fit_transform(X_centered)
-        print(Y.shape)
 
         arr = np.zeros((self.num_of_hist_data,self.num_of_assets*self.num_of_components))
 
