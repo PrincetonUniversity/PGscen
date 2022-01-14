@@ -89,13 +89,16 @@ class GeminiEngine(object):
 
             # solar case
             if 'site_ids' in meta_df.columns:
-                self.meta_df = self.meta_df.sort_values('site_ids').set_index(
-                    'site_ids', verify_integrity=True)
+                self.meta_df = self.meta_df.sort_values(
+                    'site_ids').set_index('site_ids',
+                                          verify_integrity=True).rename(
+                        columns={'AC_capacity_MW': 'Capacity'})
 
             # wind case
             elif 'Facility.Name' in meta_df.columns:
                 self.meta_df = self.meta_df.sort_values(
-                    'Facility.Name').set_index('Facility.Name').rename(
+                    'Facility.Name').set_index('Facility.Name',
+                                               verify_integrity=True).rename(
                         columns={'lati': 'latitude', 'longi': 'longitude'})
 
             else:
@@ -181,8 +184,13 @@ class GeminiEngine(object):
 
         self.model.get_forecast(forecast_df)
         self.model.fit_conditional_gpd(self.asset_type, **gpd_args)
-        self.model.generate_gauss_scenarios(nscen)
 
+        if self.meta_df is None:
+            upper_dict = None
+        else:
+            upper_dict = self.meta_df.Capacity
+
+        self.model.generate_gauss_scenarios(nscen, upper_dict=upper_dict)
         self.scenarios[self.asset_type] = self.model.scen_df
         self.forecasts[self.asset_type] = self.get_forecast(forecast_df)
 
@@ -804,12 +812,12 @@ class SolarGeminiEngine(GeminiEngine):
                 # conditionally-derived parameters
                 solar_md.generate_gauss_scenarios(
                     nscen, sqrt_cov=sqrt_cov, mu=mu,
-                    upper_dict=self.meta_df.AC_capacity_MW
+                    upper_dict=self.meta_df.Capacity
                     )
 
             else:
                 solar_md.generate_gauss_scenarios(
-                    nscen, upper_dict=self.meta_df.AC_capacity_MW)
+                    nscen, upper_dict=self.meta_df.Capacity)
 
             solar_scens.update(solar_md.scen_df)
 
@@ -915,10 +923,8 @@ class SolarGeminiEngine(GeminiEngine):
             sqrt_cov, mu = solar_md.conditional_multivar_normal_partial_time(
                 0, len(solar_md.scen_timesteps) - 1, solar_joint_scen_df)
 
-        solar_md.generate_gauss_scenarios(
-            nscen, sqrt_cov=sqrt_cov, mu=mu,
-            upper_dict=self.meta_df.AC_capacity_MW
-            )
+        solar_md.generate_gauss_scenarios(nscen, sqrt_cov=sqrt_cov, mu=mu,
+                                          upper_dict=self.meta_df.Capacity)
         solar_scens.update(solar_md.scen_df)
 
         self.gemini_dict['day']['joint_model'] = joint_md
@@ -957,10 +963,8 @@ class SolarGeminiEngine(GeminiEngine):
 
             # generate scenarios using this model and the
             # conditionally-derived parameters
-            solar_md.generate_gauss_scenarios(
-                nscen, sqrt_cov=sqrt_cov, mu=mu,
-                upper_dict=self.meta_df.AC_capacity_MW
-                )
+            solar_md.generate_gauss_scenarios(nscen, sqrt_cov=sqrt_cov, mu=mu,
+                                              upper_dict=self.meta_df.Capacity)
             solar_scens.update(solar_md.scen_df)
 
         # save the generated scenarios and the forecasted asset values for the

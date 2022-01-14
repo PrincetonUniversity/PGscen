@@ -6,9 +6,10 @@ Please see the Jupyter notebooks available in the `examples/` directory for an o
 
 ## Installation ##
 
-To install PGscen, first clone this repository at the latest release:
+PGscen is available for installation on Linux-based operating systems such as Ubuntu as well as macOS. To install
+PGscen, first clone this repository at the latest release:
 
-```git clone https://github.com/PrincetonUniversity/PGscen.git --branch v0.2.0-rc.4 --single-branch```
+```git clone https://github.com/PrincetonUniversity/PGscen.git --branch v0.2.0-rc.5 --single-branch```
 
 Next, navigate to the cloned directory to create and activate the conda environment containing the prerequisite
 packages for PGscen:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 setuptools.setup(
     name='pgscen',
-    version='0.2.0-rc.4',
+    version='0.2.0-rc.5',
     description="power grid scenario creation platform for "
                 "load and production of wind and solar",
 
