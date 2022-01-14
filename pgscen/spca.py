@@ -12,9 +12,25 @@ from typing import List, Dict, Tuple, Iterable, Optional
 from pgscen.utils.r_utils import (qdist, gaussianize, graphical_lasso, gemini,
                                   fit_dist, get_ecdf_data)
 
-from sklearn.decomposition import (PCA, SparsePCA)                                
+from rpy2.robjects.packages import importr
+import rpy2.robjects as robjects
+import rpy2.robjects.numpy2ri
+rpy2.robjects.numpy2ri.activate()
+sparsepca = importr('sparsepca')
 
-class PCAGeminiEngine(GeminiEngine):
+
+def spca(X, k, alpha=1e-04, beta=1e-04, verbose=False):
+    f = sparsepca.spca
+    m,n = X.shape
+    res = f(robjects.r.matrix(X,nrow=m,ncol=n), k, alpha=alpha, beta=beta, verbose=verbose)
+    res_dict = dict(zip(res.names, list(res)))
+
+    return {'loadings':res_dict['loadings'],'transform':res_dict['transform'],'scores':res_dict['scores']}
+
+
+
+
+class SPCAGeminiEngine(GeminiEngine):
 
     def __init__(self,
                  solar_hist_actual_df: pd.DataFrame,
@@ -32,7 +48,7 @@ class PCAGeminiEngine(GeminiEngine):
 
     def fit(self, num_of_components: float, asset_rho: float, horizon_rho: float) -> None:
 
-        self.model = PCAGeminiModel(self.scen_start_time, self.get_hist_df_dict(),
+        self.model = SPCAGeminiModel(self.scen_start_time, self.get_hist_df_dict(),
                                  None, None,
                                  self.forecast_resolution_in_minute,
                                  self.num_of_horizons,
@@ -51,7 +67,7 @@ class PCAGeminiEngine(GeminiEngine):
         self.scenarios[self.asset_type] = self.model.scen_df
         self.forecasts[self.asset_type] = self.get_forecast(forecast_df)
 
-class PCAGeminiModel(GeminiModel):
+class SPCAGeminiModel(GeminiModel):
     
     
     def __init__(self,
@@ -90,9 +106,8 @@ class PCAGeminiModel(GeminiModel):
             
             X_centered[i*self.num_of_hist_data:(i+1)*self.num_of_hist_data,:] = X-X.mean(axis=0)
             
-        pca = PCA(n_components=num_of_components, svd_solver='full')
-        # pca = SparsePCA(n_components=num_of_components,random_state=0)
-        Y = pca.fit_transform(X_centered)
+        pca = spca(X_centered, num_of_components)
+        Y = X_centered@pca['loadings']
 
         arr = np.zeros((self.num_of_hist_data,self.num_of_assets*self.num_of_components))
 
@@ -105,7 +120,6 @@ class PCAGeminiModel(GeminiModel):
                     index=self.hist_dev_df.index)
         self.hist_dev_mean_dict = mean_dict
         self.pca = pca
-        self.pca_residual = 1-pca.explained_variance_ratio_.cumsum()[-1]
 
         # Make transformed data Gaussian
         self.pca_scen_timesteps = self.scen_timesteps[0:self.num_of_components]
@@ -239,7 +253,7 @@ class PCAGeminiModel(GeminiModel):
         for i,asset in enumerate(self.asset_list):
             cols = [(asset,t) for t in self.pca_scen_timesteps]
             arr[:, (i * self.num_of_horizons):((i+1) * self.num_of_horizons)] = \
-                self.pca.inverse_transform(self.scen_pca_df[cols].values) + \
+                self.scen_pca_df[cols].values@self.pca['transform'].T + \
                     self.hist_dev_mean_dict[asset]['mean']
         scen_df = pd.DataFrame(data=arr, columns=pd.MultiIndex.from_tuples(
                     [(asset, ts) for asset in self.asset_list

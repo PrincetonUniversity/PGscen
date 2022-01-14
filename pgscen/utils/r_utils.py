@@ -211,6 +211,23 @@ def qdist(dist: Union[GPD, ECDF], x: np.array) -> np.array:
             tuple(dist.rclass))))
     
 
+# def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
+#     """Transform the data to fit a Gaussian distribution."""
+
+#     unif_df = pd.DataFrame(columns=df.columns,index=df.index)
+#     dist_dict = dict()
+
+#     for col in df.columns:
+#         data = np.ascontiguousarray(df[col].values)
+
+#         dist_dict[col] = stats.ecdf(data)
+#         unif_df[col] = np.array(dist_dict[col](robjects.FloatVector(data)))
+
+#     unif_df.clip(lower=1e-5, upper=0.99999, inplace=True)
+#     gauss_df = unif_df.apply(norm.ppf)
+
+#     return dist_dict, gauss_df
+
 def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
     """Transform the data to fit a Gaussian distribution."""
 
@@ -220,8 +237,8 @@ def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
     for col in df.columns:
         data = np.ascontiguousarray(df[col].values)
 
-        dist_dict[col] = stats.ecdf(data)
-        unif_df[col] = np.array(dist_dict[col](robjects.FloatVector(data)))
+        dist_dict[col] = fit_dist(data)
+        unif_df[col] = np.array(pdist(dist_dict[col],data))
 
     unif_df.clip(lower=1e-5, upper=0.99999, inplace=True)
     gauss_df = unif_df.apply(norm.ppf)
