@@ -9,8 +9,8 @@ from scipy.linalg import sqrtm
 from scipy.stats import norm
 from typing import List, Dict, Tuple, Iterable, Optional
 
-from pgscen.utils.r_utils import (qdist, gaussianize, graphical_lasso, gemini,
-                                  fit_dist, get_ecdf_data)
+from pgscen.utils.r_utils import (qdist, gaussianize, graphical_lasso, gemini, 
+                                  fit_dist, get_ecdf_data, ecdf)
 
 from sklearn.decomposition import (PCA, SparsePCA)                                
 
@@ -46,7 +46,7 @@ class PCAGeminiEngine(GeminiEngine):
                         **gpd_args) -> None:
 
         self.model.get_forecast(forecast_df)
-        self.model.generate_gauss_pca_scenarios(nscen, upper_dict=self.meta_df.AC_capacity_MW)
+        self.model.generate_gauss_pca_scenarios(self.meta_df, nscen, upper_dict=self.meta_df.AC_capacity_MW)
 
         self.scenarios[self.asset_type] = self.model.scen_df
         self.forecasts[self.asset_type] = self.get_forecast(forecast_df)
@@ -72,9 +72,92 @@ class PCAGeminiModel(GeminiModel):
                  forecast_lead_time_in_hour)
 
 
+    def fit_conditional_marginal_dist(self, meta_df,
+                            bin_width_ratio: float = 0.05,
+                            min_sample_size: int = 200,
+                            positive_actual: bool = False) -> None:
+        """
+        Fit marginal distribution conditional on the forecast
+        """
+
+        self.marginal_dict = {}
+        for asset in self.asset_list:
+
+            capacity = meta_df.loc[asset].AC_capacity_MW
+
+            asset_df = self.deviation_dict[asset]
+
+            if positive_actual:
+                asset_df = asset_df[asset_df['Actual'] > 0.]
+
+            # find the range of historical forecasts
+            fcst_min = asset_df['Forecast'].min()
+            fcst_max = asset_df['Forecast'].max()
+
+            for timestep in self.scen_timesteps:
+                fcst = self.forecasts[asset, timestep]
+
+                
+                # hist_dev_data = get_ecdf_data(
+                #     self.gpd_dict[asset, timestep])
+
+                hist_dev_data = self.gpd_dict[asset, timestep].data
+                hist_dev_range = np.max(
+                    hist_dev_data) - np.min(hist_dev_data)
+
+                # if the forecast is too small, use all historical
+                # deviations
+                if (fcst <= 0.15 * fcst_max
+                        and hist_dev_range <= 0.15 * fcst_max):
+                    data = np.ascontiguousarray(hist_dev_data)
+
+                # if False:
+                #     pass
+
+                # otherwise take the usual forecast +/- 5% of range bin
+                else:
+                    lower = max(fcst_min, fcst - bin_width_ratio * (
+                                fcst_max - fcst_min))
+                    upper = min(fcst_max, fcst + bin_width_ratio * (
+                                fcst_max - fcst_min))
+
+                    selected_df = asset_df[(asset_df['Forecast'] >= lower)
+                                            & (asset_df['Forecast']
+                                                <= upper)]
+
+                    data = np.ascontiguousarray(
+                        selected_df['Deviation'].values)
+
+                    # if binning data on forecast has insufficient samples,
+                    # use the nearest data points as samples
+                    if len(data) < min_sample_size:
+                        idx = (asset_df.sort_values(
+                            'Forecast') - fcst).abs().sort_values(
+                            'Forecast').index[0:min_sample_size]
+                        data = np.ascontiguousarray(
+                            asset_df.loc[idx, 'Deviation'].values)
+
+                data = np.clip(data, -fcst, capacity-fcst)
+
+                try:
+                    self.marginal_dict[asset, timestep] = ecdf(data)
+
+                except:
+                    raise RuntimeError(
+                        f'Debugging: unable to fit gpd for {asset} {timestep}')
+
+
     def pca_transform(self, num_of_components):
+
+        gpd_dict, self.gauss_df = gaussianize(self.hist_dev_df)
+        self.gpd_dict = {
+            (asset, timestep): gpd_dict[asset, horizon]
+            for asset in self.asset_list
+            for horizon, timestep in enumerate(self.scen_timesteps)
+            }
+
         self.num_of_components = num_of_components
-        self.num_of_hist_data = self.hist_dev_df.shape[0]
+        self.num_of_hist_data = self.gauss_df.shape[0]
 
         mean_dict = dict()
         X_centered = np.zeros((self.num_of_assets*self.num_of_hist_data,24))
@@ -82,7 +165,7 @@ class PCAGeminiModel(GeminiModel):
         for i,asset in enumerate(self.asset_list):
             cols = [(asset,h) for h in range(24)]
             
-            X = self.hist_dev_df[cols].values
+            X = self.gauss_df[cols].values
             
             mean_dict[asset] = dict()
             mean_dict[asset]['original'] = X
@@ -91,7 +174,6 @@ class PCAGeminiModel(GeminiModel):
             X_centered[i*self.num_of_hist_data:(i+1)*self.num_of_hist_data,:] = X-X.mean(axis=0)
             
         pca = PCA(n_components=num_of_components, svd_solver='full')
-        # pca = SparsePCA(n_components=num_of_components,random_state=0)
         Y = pca.fit_transform(X_centered)
 
         arr = np.zeros((self.num_of_hist_data,self.num_of_assets*self.num_of_components))
@@ -99,23 +181,16 @@ class PCAGeminiModel(GeminiModel):
         for i,asset in enumerate(self.asset_list):
             arr[:,i*self.num_of_components:(i+1)*self.num_of_components] = Y[i*self.num_of_hist_data:(i+1)*self.num_of_hist_data,:]
             
-        self.pca_hist_dev_df = pd.DataFrame(data=arr, 
+        self.pca_gauss_df = pd.DataFrame(data=arr, 
                 columns=pd.MultiIndex.from_tuples([(asset, comp) for asset in self.asset_list
                     for comp in range(self.num_of_components)]), 
-                    index=self.hist_dev_df.index)
-        self.hist_dev_mean_dict = mean_dict
+                    index=self.gauss_df.index)
+        self.gauss_mean_dict = mean_dict
         self.pca = pca
         self.pca_residual = 1-pca.explained_variance_ratio_.cumsum()[-1]
 
         # Make transformed data Gaussian
         self.pca_scen_timesteps = self.scen_timesteps[0:self.num_of_components]
-
-        gpd_dict, self.gauss_df = gaussianize(self.pca_hist_dev_df)
-        self.gpd_dict = {
-            (asset, timestep): gpd_dict[asset, horizon]
-            for asset in self.asset_list
-            for horizon, timestep in enumerate(self.pca_scen_timesteps)
-            }
 
     # def pca_transform(self, num_of_components):
     #     """
@@ -160,18 +235,18 @@ class PCAGeminiModel(GeminiModel):
 
     def fit(self, asset_rho: float, pca_comp_rho: float) -> None:
         if self.num_of_assets == 1:
-            horizon_prec = graphical_lasso(self.gauss_df, self.num_of_components,
+            pca_comp_prec = graphical_lasso(self.pca_gauss_df, self.num_of_components,
                                            pca_comp_rho)
             asset_prec = np.array([[1.0]])
 
         elif self.num_of_horizons == 1:
-            asset_prec = graphical_lasso(self.gauss_df, self.num_of_assets,
+            asset_prec = graphical_lasso(self.pca_gauss_df, self.num_of_assets,
                                          asset_rho)
-            horizon_prec = np.array([[1.0]])
+            pca_comp_prec = np.array([[1.0]])
 
         else:
             asset_prec, pca_comp_prec = gemini(
-                self.gauss_df, self.num_of_assets, self.num_of_components,
+                self.pca_gauss_df, self.num_of_assets, self.num_of_components,
                 asset_rho, pca_comp_rho
                 )
 
@@ -192,6 +267,7 @@ class PCAGeminiModel(GeminiModel):
 
 
     def generate_gauss_pca_scenarios(self, 
+            meta_df,
             nscen: int,
             lower_dict: Optional[pd.Series] = None,
             upper_dict: Optional[pd.Series] = None
@@ -205,25 +281,47 @@ class PCAGeminiModel(GeminiModel):
         arr = sqrt_cov @ np.random.randn(
             len(self.asset_list) * self.num_of_components, nscen)
 
-        scen_df = pd.DataFrame(
+        pca_scen_df = pd.DataFrame(
             data=arr.T, columns=pd.MultiIndex.from_tuples(
                 [(asset, horizon) for asset in self.asset_list
                  for horizon in range(self.num_of_components)]
                 )
             )
 
-        self.scen_gauss_df = scen_df.copy()
-        scen_df.columns = pd.MultiIndex.from_tuples(
-            scen_df.columns).set_levels(self.pca_scen_timesteps, level=1)
+        pca_scen_df.columns = pd.MultiIndex.from_tuples(
+            pca_scen_df.columns).set_levels(self.pca_scen_timesteps, level=1)
+        self.pca_scen_gauss_df = pca_scen_df.copy()
+
+        # inverse pca transform
+        arr = np.zeros((nscen, self.num_of_horizons * self.num_of_assets))
+        for i,asset in enumerate(self.asset_list):
+            cols = [(asset,t) for t in self.pca_scen_timesteps]
+            arr[:, (i * self.num_of_horizons):((i+1) * self.num_of_horizons)] = \
+                self.pca.inverse_transform(self.pca_scen_gauss_df[cols].values) + \
+                    self.gauss_mean_dict[asset]['mean']
+        scen_df = pd.DataFrame(data=arr, columns=pd.MultiIndex.from_tuples(
+                    [(asset, ts) for asset in self.asset_list
+                        for ts in self.scen_timesteps]
+                    )
+                )
+
+        # self.scen_df = scen_df
+
+        self.gauss_scen_df = scen_df.copy()
+
+        # Fit conditional marginal distributions
+        self.fit_conditional_marginal_dist(meta_df, positive_actual=True)
 
         # invert the Gaussian scenario deviations by the marginal distributions
         if not self.gauss:
             scen_means, scen_vars = scen_df.mean(), scen_df.std()
+            scen_means[scen_vars<1e-2] = 99999.
+            scen_vars[scen_vars<1e-2] = 1.
             u_mat = norm.cdf((scen_df - scen_means) / scen_vars)
 
-            if self.conditional_gpd_dict:
+            if self.fit_conditional_marginal_dist:
                 scen_df = pd.DataFrame({
-                    col: qdist(self.conditional_gpd_dict[col], u_mat[:, i])
+                    col: self.marginal_dict[col].quantfun(u_mat[:, i])
                     for i, col in enumerate(scen_df.columns)
                     })
             else:
@@ -232,20 +330,16 @@ class PCAGeminiModel(GeminiModel):
                     for i, col in enumerate(scen_df.columns)
                     })
 
-        self.scen_pca_df = scen_df
-
-        # inverse pca transform
-        arr = np.zeros((nscen, self.num_of_horizons * self.num_of_assets))
-        for i,asset in enumerate(self.asset_list):
-            cols = [(asset,t) for t in self.pca_scen_timesteps]
-            arr[:, (i * self.num_of_horizons):((i+1) * self.num_of_horizons)] = \
-                self.pca.inverse_transform(self.scen_pca_df[cols].values) + \
-                    self.hist_dev_mean_dict[asset]['mean']
-        scen_df = pd.DataFrame(data=arr, columns=pd.MultiIndex.from_tuples(
-                    [(asset, ts) for asset in self.asset_list
-                        for ts in self.scen_timesteps]
-                    )
-                )
+            # if self.conditional_gpd_dict:
+            #     scen_df = pd.DataFrame({
+            #         col: qdist(self.conditional_gpd_dict[col], u_mat[:, i])
+            #         for i, col in enumerate(scen_df.columns)
+            #         })
+            # else:
+            #     scen_df = pd.DataFrame({
+            #         col: qdist(self.gpd_dict[col], u_mat[:, i])
+            #         for i, col in enumerate(scen_df.columns)
+            #         })
 
         # if we have loaded forecasts for the scenario time points, add the
         # unnormalized deviations to the forecasts to produce scenario values

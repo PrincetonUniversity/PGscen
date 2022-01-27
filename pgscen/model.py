@@ -394,8 +394,10 @@ class GeminiModel(object):
                             asset_df.loc[idx, 'Deviation'].values)
 
                 elif asset_type == 'solar':
-                    hist_dev_data = get_ecdf_data(
-                        self.gpd_dict[asset, timestep])
+                    # hist_dev_data = get_ecdf_data(
+                    #     self.gpd_dict[asset, timestep])
+
+                    hist_dev_data = self.gpd_dict[asset, timestep].data
                     hist_dev_range = np.max(
                         hist_dev_data) - np.min(hist_dev_data)
 
