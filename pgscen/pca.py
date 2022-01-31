@@ -11,6 +11,7 @@ from typing import List, Dict, Tuple, Iterable, Optional
 
 from pgscen.utils.r_utils import (qdist, gaussianize, graphical_lasso, gemini, 
                                   fit_dist, get_ecdf_data, ecdf)
+from pgscen.utils.solar_utils import get_yearly_date_range
 
 from sklearn.decomposition import (PCA, SparsePCA)                                
 
@@ -147,7 +148,15 @@ class PCAGeminiModel(GeminiModel):
                         f'Debugging: unable to fit gpd for {asset} {timestep}')
 
 
-    def pca_transform(self, num_of_components):
+    # def select_hist
+    def pca_transform(self, num_of_components, num_of_days=30):
+
+        date_range = get_yearly_date_range(self.scen_start_time, 
+                end=(self.scen_start_time-pd.Timedelta(1,unit='D')).strftime('%Y%m%d'), num_of_days=num_of_days)
+        train_index = [d+pd.Timedelta(6,unit='H') for d in date_range]
+
+        self.old_hist_dev_df = self.hist_dev_df
+        self.hist_dev_df = self.old_hist_dev_df[self.old_hist_dev_df.index.isin(train_index)]
 
         gpd_dict, self.gauss_df = gaussianize(self.hist_dev_df)
         self.gpd_dict = {

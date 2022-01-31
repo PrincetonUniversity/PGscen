@@ -30,11 +30,11 @@ def main():
 
     solar_site_actual_df, solar_site_forecast_df, solar_meta_df = load_solar_data('../data/')
     nscen = 1000
-    save_dir = '/Users/xy3134/Research/PERFORM/Data/Outputs/PGscen/PCA'
-    
+    # save_dir = '/Users/xy3134/Research/PERFORM/Data/Outputs/PGscen/PCA'
+    save_dir = '/projects/PERFORM/xyang/scenarios/pca2'
 
 
-    for scen_start_time in pd.date_range(start='2018-01-02 06:00:00', periods=2, freq='D', tz='utc'):
+    for scen_start_time in pd.date_range(start='2018-12-17 06:00:00', periods=1, freq='D', tz='utc'):
 
         print(scen_start_time)
         
