@@ -1,3 +1,4 @@
+from os import times
 from pgscen.model import GeminiModel
 from pgscen.engine import GeminiEngine
 
@@ -11,9 +12,10 @@ from typing import List, Dict, Tuple, Iterable, Optional
 
 from pgscen.utils.r_utils import (qdist, gaussianize, graphical_lasso, gemini, 
                                   fit_dist, get_ecdf_data, ecdf)
-from pgscen.utils.solar_utils import get_yearly_date_range
+from pgscen.utils.solar_utils import (get_yearly_date_range, get_asset_trans_hour_info)
 
-from sklearn.decomposition import (PCA, SparsePCA)                                
+from sklearn.decomposition import (PCA, SparsePCA)        
+from astral import LocationInfo                        
 
 class PCAGeminiEngine(GeminiEngine):
 
@@ -31,6 +33,104 @@ class PCAGeminiEngine(GeminiEngine):
                          forecast_resolution_in_minute, num_of_horizons,
                          forecast_lead_time_in_hour)
 
+        ################### Compute transitional hour delay time #########################
+
+        print('computing hour delay time....')
+
+        hist_dates = solar_hist_forecast_df.groupby('Issue_time').head(1)['Forecast_time'].tolist()
+        delay_dict = dict()
+        hist_sun_dict = dict()
+
+        for asset,row in self.meta_df.iterrows():
+            lat = row['latitude']
+            lon = row['longitude']
+            loc = LocationInfo(asset,'Texas','USA',lat,lon)
+
+            act_df = solar_hist_actual_df[asset]
+            fcst_df = solar_hist_forecast_df.set_index('Forecast_time')[asset]
+            
+            sunrise_data,sunset_data = [],[]
+            day_data = {'Time':[], 'Actual':[], 'Forecast':[], 'Deviation':[]}
+
+            for date in hist_dates:
+                trans = get_asset_trans_hour_info(loc,date)
+                
+                # Sunrise
+                sunrise_dict = trans['sunrise']
+                sunrise_time,sunrise_active,sunrise_horizon = sunrise_dict['time'],\
+                    sunrise_dict['active'],sunrise_dict['timestep']
+                act = act_df.loc[sunrise_horizon]
+                fcst = fcst_df.loc[sunrise_horizon]
+                sunrise_data.append([sunrise_time,sunrise_horizon,act,fcst,act-fcst,sunrise_active])
+                
+                # Sunset
+                sunset_dict = trans['sunset']
+                sunset_time,sunset_active,sunset_horizon = sunset_dict['time'],\
+                    sunset_dict['active'],sunset_dict['timestep']
+                act = act_df.loc[sunset_horizon]
+                fcst = fcst_df.loc[sunset_horizon]
+                sunset_data.append([sunset_time,sunset_horizon,act,fcst,act-fcst,sunset_active])
+
+                # Daytime
+                act = act_df[(act_df.index>sunrise_horizon) & (act_df.index<sunset_horizon)].sort_index()
+                fcst = fcst_df[(fcst_df.index>sunrise_horizon) & (fcst_df.index<sunset_horizon)].sort_index()
+                day_data['Time'] += act.index.tolist()
+                day_data['Actual'] += act.values.tolist()
+                day_data['Forecast'] += fcst.values.tolist()
+                day_data['Deviation'] += (act-fcst).values.tolist()
+
+
+
+            sunrise_df = pd.DataFrame(data=sunrise_data,
+                                    columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
+            sunset_df = pd.DataFrame(data=sunset_data,
+                                    columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
+            day_df = pd.DataFrame(day_data).set_index('Time')
+            
+            hist_sun_dict[asset] = {'sunrise':sunrise_df, 'sunset':sunset_df, 'day':day_df,}
+
+            # Figure out delay times
+            for m in range(60):
+                if sunrise_df[sunrise_df['Active Minutes']==m]['Actual'].sum()>0:
+                    sunrise_delay_in_minutes = m-1
+                    break
+                    
+            for m in range(60):
+                if sunset_df[sunset_df['Active Minutes']==m]['Actual'].sum()>0:
+                    sunset_delay_in_minutes = m-1
+                    break 
+                    
+            delay_dict[asset] = {'sunrise':sunrise_delay_in_minutes,'sunset':sunset_delay_in_minutes}
+        
+        self.hist_sun_info = hist_sun_dict
+        self.trans_delay = delay_dict
+
+
+        ################################### Compute transitional hour statistics ######################
+
+        trans_horizon_dict = {'sunrise':{},'sunset':{}}
+        
+        for asset,row in self.meta_df.iterrows():
+            
+            lat = row['latitude']
+            lon = row['longitude']
+            loc = LocationInfo(asset,'Texas','USA',lat,lon)
+            
+            sunrise_delay_in_minutes = self.trans_delay[asset]['sunrise']
+            sunset_delay_in_minutes = self.trans_delay[asset]['sunset']   
+
+            ################# Get scenario date transitional hour timestep ###############
+            trans = get_asset_trans_hour_info(loc,self.scen_start_time.floor('D'),
+                                            sunrise_delay_in_minutes=sunrise_delay_in_minutes,
+                                            sunset_delay_in_minutes=sunset_delay_in_minutes)
+            
+            trans_horizon_dict['sunrise'][asset] = {'timestep':trans['sunrise']['timestep'],'active':trans['sunrise']['active']}
+            trans_horizon_dict['sunset'][asset] = {'timestep':trans['sunset']['timestep'],'active':trans['sunset']['active']}
+
+        self.trans_horizon = trans_horizon_dict
+
+
+
     def fit(self, num_of_components: float, asset_rho: float, horizon_rho: float) -> None:
 
         self.model = PCAGeminiModel(self.scen_start_time, self.get_hist_df_dict(),
@@ -47,7 +147,8 @@ class PCAGeminiEngine(GeminiEngine):
                         **gpd_args) -> None:
 
         self.model.get_forecast(forecast_df)
-        self.model.generate_gauss_pca_scenarios(self.meta_df, nscen, upper_dict=self.meta_df.AC_capacity_MW)
+        self.model.generate_gauss_pca_scenarios(self.trans_horizon, 
+            self.hist_sun_info, nscen, upper_dict=self.meta_df.AC_capacity_MW)
 
         self.scenarios[self.asset_type] = self.model.scen_df
         self.forecasts[self.asset_type] = self.get_forecast(forecast_df)
@@ -73,10 +174,8 @@ class PCAGeminiModel(GeminiModel):
                  forecast_lead_time_in_hour)
 
 
-    def fit_conditional_marginal_dist(self, meta_df,
-                            bin_width_ratio: float = 0.05,
-                            min_sample_size: int = 200,
-                            positive_actual: bool = False) -> None:
+    def fit_conditional_marginal_dist(self, trans_timestep, hist_dict,
+                            bin_width_ratio: float = 0.05) -> None:
         """
         Fit marginal distribution conditional on the forecast
         """
@@ -84,63 +183,52 @@ class PCAGeminiModel(GeminiModel):
         self.marginal_dict = {}
         for asset in self.asset_list:
 
-            capacity = meta_df.loc[asset].AC_capacity_MW
+            # capacity = meta_df.loc[asset].AC_capacity_MW
 
-            asset_df = self.deviation_dict[asset]
+            sunrise_hrz, sunrise_active = trans_timestep['sunrise'][asset]['timestep'], trans_timestep['sunrise'][asset]['active']
+            sunset_hrz, sunset_active = trans_timestep['sunset'][asset]['timestep'], trans_timestep['sunset'][asset]['active']
 
-            if positive_actual:
-                asset_df = asset_df[asset_df['Actual'] > 0.]
-
-            # find the range of historical forecasts
-            fcst_min = asset_df['Forecast'].min()
-            fcst_max = asset_df['Forecast'].max()
+            sunrise_df, sunset_df, day_df = hist_dict[asset]['sunrise'], \
+                hist_dict[asset]['sunset'], hist_dict[asset]['day']
 
             for timestep in self.scen_timesteps:
                 fcst = self.forecasts[asset, timestep]
 
-                
-                # hist_dev_data = get_ecdf_data(
-                #     self.gpd_dict[asset, timestep])
+                if timestep == sunrise_hrz:
+                    # Sunrise horizon
+                    lower = max(0, sunrise_active-5)
+                    upper = min(59, sunrise_active+5)
 
-                hist_dev_data = self.gpd_dict[asset, timestep].data
-                hist_dev_range = np.max(
-                    hist_dev_data) - np.min(hist_dev_data)
+                    selected_df = sunrise_df[(sunrise_df['Active Minutes'] >= lower)
+                                            & (sunrise_df['Active Minutes']<= upper)]
 
-                # if the forecast is too small, use all historical
-                # deviations
-                if (fcst <= 0.15 * fcst_max
-                        and hist_dev_range <= 0.15 * fcst_max):
-                    data = np.ascontiguousarray(hist_dev_data)
+                elif timestep == sunset_hrz:
+                    # Sunset horizon
+                    lower = max(0, sunset_active-5)
+                    upper = min(59, sunset_active+5)
 
-                # if False:
-                #     pass
+                    selected_df = sunset_df[(sunset_df['Active Minutes'] >= lower)
+                                            & (sunset_df['Active Minutes']<= upper)]
 
-                # otherwise take the usual forecast +/- 5% of range bin
-                else:
+                elif sunrise_hrz < timestep < sunset_hrz:
+                    # Daytime horizons
+
+                    fcst_min, fcst_max = day_df['Forecast'].min(), day_df['Forecast'].max()
+
                     lower = max(fcst_min, fcst - bin_width_ratio * (
                                 fcst_max - fcst_min))
                     upper = min(fcst_max, fcst + bin_width_ratio * (
                                 fcst_max - fcst_min))
 
-                    selected_df = asset_df[(asset_df['Forecast'] >= lower)
-                                            & (asset_df['Forecast']
+                    selected_df = day_df[(day_df['Forecast'] >= lower)
+                                            & (day_df['Forecast']
                                                 <= upper)]
-
-                    data = np.ascontiguousarray(
-                        selected_df['Deviation'].values)
-
-                    # if binning data on forecast has insufficient samples,
-                    # use the nearest data points as samples
-                    if len(data) < min_sample_size:
-                        idx = (asset_df.sort_values(
-                            'Forecast') - fcst).abs().sort_values(
-                            'Forecast').index[0:min_sample_size]
-                        data = np.ascontiguousarray(
-                            asset_df.loc[idx, 'Deviation'].values)
-
-                data = np.clip(data, -fcst, capacity-fcst)
+                else:
+                    # Nighttime horizons
+                    selected_df = pd.DataFrame({'Deviation':np.zeros(1000)})    
 
                 try:
+                    data = np.ascontiguousarray(selected_df['Deviation'].values)
                     self.marginal_dict[asset, timestep] = ecdf(data)
 
                 except:
@@ -148,8 +236,83 @@ class PCAGeminiModel(GeminiModel):
                         f'Debugging: unable to fit gpd for {asset} {timestep}')
 
 
+    # def fit_conditional_marginal_dist(self, meta_df,
+    #                         bin_width_ratio: float = 0.05,
+    #                         min_sample_size: int = 200,
+    #                         positive_actual: bool = False) -> None:
+    #     """
+    #     Fit marginal distribution conditional on the forecast
+    #     """
+
+    #     self.marginal_dict = {}
+    #     for asset in self.asset_list:
+
+    #         capacity = meta_df.loc[asset].AC_capacity_MW
+
+    #         asset_df = self.deviation_dict[asset]
+
+    #         if positive_actual:
+    #             asset_df = asset_df[asset_df['Actual'] > 0.]
+
+    #         # find the range of historical forecasts
+    #         fcst_min = asset_df['Forecast'].min()
+    #         fcst_max = asset_df['Forecast'].max()
+
+    #         for timestep in self.scen_timesteps:
+    #             fcst = self.forecasts[asset, timestep]
+
+                
+    #             # hist_dev_data = get_ecdf_data(
+    #             #     self.gpd_dict[asset, timestep])
+
+    #             hist_dev_data = self.gpd_dict[asset, timestep].data
+    #             hist_dev_range = np.max(
+    #                 hist_dev_data) - np.min(hist_dev_data)
+
+    #             # if the forecast is too small, use all historical
+    #             # deviations
+    #             if (fcst <= 0.15 * fcst_max
+    #                     and hist_dev_range <= 0.15 * fcst_max):
+    #                 data = np.ascontiguousarray(hist_dev_data)
+
+    #             # if False:
+    #             #     pass
+
+    #             # otherwise take the usual forecast +/- 5% of range bin
+    #             else:
+    #                 lower = max(fcst_min, fcst - bin_width_ratio * (
+    #                             fcst_max - fcst_min))
+    #                 upper = min(fcst_max, fcst + bin_width_ratio * (
+    #                             fcst_max - fcst_min))
+
+    #                 selected_df = asset_df[(asset_df['Forecast'] >= lower)
+    #                                         & (asset_df['Forecast']
+    #                                             <= upper)]
+
+    #                 data = np.ascontiguousarray(
+    #                     selected_df['Deviation'].values)
+
+    #                 # if binning data on forecast has insufficient samples,
+    #                 # use the nearest data points as samples
+    #                 if len(data) < min_sample_size:
+    #                     idx = (asset_df.sort_values(
+    #                         'Forecast') - fcst).abs().sort_values(
+    #                         'Forecast').index[0:min_sample_size]
+    #                     data = np.ascontiguousarray(
+    #                         asset_df.loc[idx, 'Deviation'].values)
+
+    #             data = np.clip(data, -fcst, capacity-fcst)
+
+    #             try:
+    #                 self.marginal_dict[asset, timestep] = ecdf(data)
+
+    #             except:
+    #                 raise RuntimeError(
+    #                     f'Debugging: unable to fit gpd for {asset} {timestep}')
+
+
     # def select_hist
-    def pca_transform(self, num_of_components, num_of_days=30):
+    def pca_transform(self, num_of_components, num_of_days=50):
 
         date_range = get_yearly_date_range(self.scen_start_time, 
                 end=(self.scen_start_time-pd.Timedelta(1,unit='D')).strftime('%Y%m%d'), num_of_days=num_of_days)
@@ -276,7 +439,8 @@ class PCAGeminiModel(GeminiModel):
 
 
     def generate_gauss_pca_scenarios(self, 
-            meta_df,
+            trans_timestep,
+            hist_dict,
             nscen: int,
             lower_dict: Optional[pd.Series] = None,
             upper_dict: Optional[pd.Series] = None
@@ -319,7 +483,9 @@ class PCAGeminiModel(GeminiModel):
         self.gauss_scen_df = scen_df.copy()
 
         # Fit conditional marginal distributions
-        self.fit_conditional_marginal_dist(meta_df, positive_actual=True)
+        # self.fit_conditional_marginal_dist(meta_df, positive_actual=True)
+        self.fit_conditional_marginal_dist(trans_timestep, hist_dict)
+
 
         # invert the Gaussian scenario deviations by the marginal distributions
         if not self.gauss:
