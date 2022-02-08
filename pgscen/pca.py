@@ -196,16 +196,16 @@ class PCAGeminiModel(GeminiModel):
 
                 if timestep == sunrise_hrz:
                     # Sunrise horizon
-                    lower = max(0, sunrise_active-5)
-                    upper = min(59, sunrise_active+5)
+                    lower = max(0, sunrise_active-7)
+                    upper = min(60, sunrise_active+7)
 
                     selected_df = sunrise_df[(sunrise_df['Active Minutes'] >= lower)
                                             & (sunrise_df['Active Minutes']<= upper)]
 
                 elif timestep == sunset_hrz:
                     # Sunset horizon
-                    lower = max(0, sunset_active-5)
-                    upper = min(59, sunset_active+5)
+                    lower = max(0, sunset_active-7)
+                    upper = min(60, sunset_active+7)
 
                     selected_df = sunset_df[(sunset_df['Active Minutes'] >= lower)
                                             & (sunset_df['Active Minutes']<= upper)]
