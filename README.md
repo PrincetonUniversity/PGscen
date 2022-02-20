@@ -31,21 +31,30 @@ the package. This is easiest done using the command line interface made availabl
 In particular, this package includes four command line tools: `pgscen-load`, `pgscen-wind`, `pgscen-solar`, and
 `pgscen-load-solar`, each of which create scenarios for the given asset type. While the first three consider load, wind,
 and solar assets separately, `pgscen-load-solar` models load and solar assets jointly to account for the fact that both
-are influenced by the same factors, and especially the weather.
+are influenced by the same factors, and especially the weather. You can also use the `pgscen` command, which generates
+all three of load, wind, and solar scenarios at the same time.
 
-The interface for all four of these tools is the same, with two required arguments:
- - `start`: The starting date for scenario generation, given in YYYY-MM-DD format. Currently supported dates are
-            2017-01-03 to 2018-12-30 for load, load-solar, and solar scenarios, and 2018-01-01 to 2018-12-30 for wind
-            scenarios, all inclusive.
- - `days`: The number of days to create scenarios for. Note that the implied date range must also fall in the intervals
-           listed above for `start`.
+The basic interface for all five of these tools is the same, with two required arguments:
+ - `start`: The starting date for scenario generation, given in YYYY-MM-DD format. Currently supported dates (all 
+            inclusive) are:
+   - 2017-01-03 to 2018-12-31 for load scenarios
+   - 2018-01-01 to 2018-12-30 for wind scenarios
+   - 2017-01-04 to 2018-12-30 for solar scenarios, except for 2017-12-31 and 2018-01-01
+   - 2017-01-05 to 2018-12-30 for load-solar scenarios, except for 2017-12-31 and 2018-01-01
+ - `days`: The number of days to create scenarios for. Note that the implied date range must also fall within the
+           intervals listed above for `start`.
 
-These tools also take the following optional arguments:
+Unlike the other tools, `pgscen` takes the optional `--joint` argument, in which case it will generate load and solar
+scenarios jointly instead of the default behaviour of modeling them separately.
+
+These tools also all take the following optional arguments:
  - `--out-dir` (`-o`): Where to store generated scenarios. By default, output files are stored in the `PGscen/data`
                        subdirectory of where this repository was cloned.
  - `--scenario-count` (`-n`): How many scenarios to generate. By default, 1000 are created.
  - `--verbose`: Whether to print messages on the state of the scenario generator. Use `-v`, `-vv` for escalating levels
                 of verbosity.
+ - `--pickle` (`-p`): Instead of writing a separate .csv file for each asset's daily scenarios, save the generated
+                      scenarios for all assets for each day as a single Python pickle file
  - `--test`: Run scenario generation using cached subsets of the ERCOT/NREL datasets to test if installation was carried
              out correctly.
 
@@ -53,13 +62,17 @@ Example usages include:
 
 `pgscen-load-solar 2017-06-29 2`
 
-`pgscen-load-solar 2018-01-25 2 -v`
+`pgscen-load-solar 2018-01-25 2 -p -v`
 
 `pgscen-load 2018-03-02 2 -o scratch/output/PGscen`
 
 `pgscen-wind 2018-07-05 3 -n 2000`
 
+`pgscen 2018-05-11 3 -p`
+
 `pgscen-solar 2017-09-22 1 -n 500 -vv`
+
+`pgscen 2018-05-11 3 --joint -o scratch/output/PGscen -p`
 
 The implementations of these command line interfaces are located at `pgscen/command_line.py`, and can be used as
 templates for designing your own PGscen workflows. See for example `pgscen/rts_gmlc/command_line.py` for one such custom

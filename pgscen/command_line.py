@@ -14,6 +14,7 @@ from .utils.data_utils import (load_load_data, load_wind_data, load_solar_data,
 from .engine import GeminiEngine, SolarGeminiEngine
 
 
+# define common command line arguments across all tools
 parent_parser = argparse.ArgumentParser(add_help=False)
 
 parent_parser.add_argument(
@@ -32,13 +33,17 @@ parent_parser.add_argument('--scenario-count', '-n', type=int,
                            help="how many scenarios to generate")
 parent_parser.add_argument('--verbose', '-v', action='count', default=0)
 
-parent_parser.add_argument('--csv', action='store_true',
-                           help="store output in .csv format instead of .p.gz")
+parent_parser.add_argument('--pickle', '-p', action='store_true',
+                           help="store output in .p.gz format instead of .csv")
+parent_parser.add_argument('--skip-existing',
+                           action='store_true', dest='skip_existing',
+                           help="don't overwrite existing output files")
 
 parent_parser.add_argument('--test', action='store_true')
 test_path = Path(Path(__file__).parent.parent, 'test', 'resources')
 
 
+# tools for creating a particular type of scenario
 def run_load():
     args = argparse.ArgumentParser(
         'pgscen-load', parents=[parent_parser],
@@ -46,8 +51,8 @@ def run_load():
         ).parse_args()
 
     t7k_runner(args.start, args.days, args.out_dir, args.scenario_count,
-               create_load=True,
-               write_csv=args.csv, verbosity=args.verbose, test=args.test)
+               create_load=True, write_csv=not args.pickle,
+               verbosity=args.verbose, test=args.test)
 
 
 def run_wind():
@@ -57,8 +62,8 @@ def run_wind():
         ).parse_args()
 
     t7k_runner(args.start, args.days, args.out_dir, args.scenario_count,
-               create_wind=True,
-               write_csv=args.csv, verbosity=args.verbose, test=args.test)
+               create_wind=True, write_csv=not args.pickle,
+               verbosity=args.verbose, test=args.test)
 
 
 def run_solar():
@@ -68,8 +73,8 @@ def run_solar():
         ).parse_args()
 
     t7k_runner(args.start, args.days, args.out_dir, args.scenario_count,
-               create_solar=True,
-               write_csv=args.csv, verbosity=args.verbose, test=args.test)
+               create_solar=True, write_csv=not args.pickle,
+               verbosity=args.verbose, test=args.test)
 
 
 def run_load_solar_joint():
@@ -79,10 +84,11 @@ def run_load_solar_joint():
         ).parse_args()
 
     t7k_runner(args.start, args.days, args.out_dir, args.scenario_count,
-               create_load_solar=True,
-               write_csv=args.csv, verbosity=args.verbose, test=args.test)
+               create_load_solar=True, write_csv=not args.pickle,
+               verbosity=args.verbose, test=args.test)
 
 
+# tool for creating all types of scenarios at the same time
 def run_t7k():
     parser = argparse.ArgumentParser(
         'pgscen', parents=[parent_parser],
@@ -96,15 +102,18 @@ def run_t7k():
     t7k_runner(args.start, args.days, args.out_dir, args.scenario_count,
                create_load=not args.joint, create_wind=True,
                create_solar=not args.joint, create_load_solar=args.joint,
-               write_csv=args.csv, verbosity=args.verbose, test=args.test)
+               write_csv=not args.pickle, skip_existing=args.skip_existing,
+               verbosity=args.verbose, test=args.test)
 
 
+#TODO: not sure that these if statements are the right way to structure this
 def t7k_runner(start_date, ndays, out_dir, scen_count,
                create_load=False, create_wind=False,
                create_solar=False, create_load_solar=False,
-               write_csv=True, verbosity=0, test=False):
+               write_csv=True, skip_existing=False, verbosity=0, test=False):
     start = ' '.join([start_date, "06:00:00"])
 
+    # load input datasets
     if create_load or create_load_solar:
         if test:
             with bz2.BZ2File(Path(test_path, "load.p.gz"), 'r') as f:
@@ -133,28 +142,28 @@ def t7k_runner(start_date, ndays, out_dir, scen_count,
     if verbosity >= 2:
         t0 = time.time()
 
+    # create scenarios for each requested day
     for scenario_start_time in pd.date_range(start=start, periods=ndays,
                                              freq='D', tz='utc'):
-        start_date = scenario_start_time.strftime('%Y-%m-%d')
+        date_lbl = scenario_start_time.strftime('%Y-%m-%d')
 
         scen_timesteps = pd.date_range(start=scenario_start_time,
                                        periods=24, freq='H')
 
-        # TODO: smarter way to account for the end of the year
-        if start_date == '2018-12-31':
-            break
-
-        out_fl = Path(out_dir, "scens_{}.p.gz".format(start_date))
-        if out_fl.exists():
-            continue
-
         if verbosity >= 1:
-            print("Creating t7k scenarios for: {}".format(
-                scenario_start_time.date()))
+            print("Creating t7k scenarios for: {}".format(date_lbl))
 
+        # don't generate scenarios for this day if they have already been saved
+        # in this output directory
         if not write_csv:
+            out_fl = Path(out_dir, "scens_{}.p.gz".format(date_lbl))
+
+            if skip_existing and out_fl.exists():
+                continue
+
             out_scens = dict()
 
+        # split input datasets into training and testing subsets
         if create_load or create_load_solar:
             (load_zone_actual_hists,
                 load_zone_actual_futures) = split_actuals_hist_future(
@@ -185,6 +194,7 @@ def t7k_runner(start_date, ndays, out_dir, scen_count,
                                            scenario_start_time, solar_meta_df,
                                            us_state='Texas')
 
+        # generate each type of requested scenario type
         if create_load:
             load_engn = GeminiEngine(load_zone_actual_hists,
                                      load_zone_forecast_hists,
@@ -216,8 +226,7 @@ def t7k_runner(start_date, ndays, out_dir, scen_count,
                 out_scens['Wind'] = wind_engn.scenarios['wind'].round(4)
 
         if create_solar:
-            solar_engn.fit_solar_model(hist_start='2017-01-01',
-                                       hist_end='2018-12-31')
+            solar_engn.fit_solar_model()
             solar_engn.create_solar_scenario(scen_count,
                                              solar_site_forecast_futures)
 
@@ -230,9 +239,7 @@ def t7k_runner(start_date, ndays, out_dir, scen_count,
 
         if create_load_solar:
             solar_engn.fit_load_solar_joint_model(
-                load_zone_actual_hists, load_zone_forecast_hists,
-                hist_start='2020-01-01', hist_end='2020-12-31'
-                )
+                load_zone_actual_hists, load_zone_forecast_hists)
 
             solar_engn.create_load_solar_joint_scenario(
                 scen_count,
