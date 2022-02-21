@@ -173,6 +173,7 @@ def t7k_runner(start_date, ndays, out_dir, scen_count,
                 load_zone_forecast_futures) = split_forecasts_hist_future(
                     load_zone_forecast_df, scen_timesteps)
 
+        # wind scenarios are in-sample because we only have a year of wind data
         if create_wind:
             (wind_site_actual_hists,
                 wind_site_actual_futures) = split_actuals_hist_future(

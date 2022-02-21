@@ -1,3 +1,4 @@
+"""Command line interface for generating scenarios for the RTS-GMLC system."""
 
 import argparse
 from pathlib import Path
@@ -15,13 +16,11 @@ from ..utils.data_utils import (split_actuals_hist_future,
 
 
 rts_parser = argparse.ArgumentParser(add_help=False, parents=[parent_parser])
-
 rts_parser.add_argument('rts_dir', type=str,
                         help="where RTS-GMLC repository is stored")
-rts_parser.add_argument('--csv', action='store_true',
-                        help="store output in .csv format instead of .p.gz")
 
 
+#TODO: consolidate the code for these interfaces like we do for t7k?
 def run_rts():
     parser = argparse.ArgumentParser(
         'pgscen-rts', parents=[rts_parser],
@@ -42,25 +41,22 @@ def run_rts():
 
     for scenario_start_time in pd.date_range(start=start, periods=args.days,
                                              freq='D', tz='utc'):
-        start_date = scenario_start_time.strftime('%Y-%m-%d')
+        date_lbl = scenario_start_time.strftime('%Y-%m-%d')
 
         scen_timesteps = pd.date_range(start=scenario_start_time,
                                        periods=24, freq='H')
 
-        # TODO: smarter way to account for the end of the year
-        if start_date == '2020-12-31':
-            break
-
-        if not args.csv:
-            out_fl = Path(args.out_dir, "scens_{}.p.gz".format(start_date))
-
-            if out_fl.exists():
-                continue
-
         if args.verbose >= 1:
             print("Creating RTS-GMLC load+wind+solar scenarios for: {}".format(
-                scenario_start_time.date()))
+                date_lbl))
 
+        if args.pickle:
+            out_fl = Path(args.out_dir, "scens_{}.p.gz".format(date_lbl))
+
+            if args.skip_existing and out_fl.exists():
+                continue
+
+        # for RTS we always do in-sample since we only have a year of data
         (load_zone_actual_hists,
             load_zone_actual_futures) = split_actuals_hist_future(
                     load_zone_actual_df, scen_timesteps, in_sample=True)
@@ -91,7 +87,7 @@ def run_rts():
                                   load_zone_forecast_futures,
                                   bin_width_ratio=0.1, min_sample_size=400)
 
-        if args.csv:
+        if not args.pickle:
             load_engn.write_to_csv(args.out_dir, load_zone_actual_futures,
                                    write_forecasts=True)
 
@@ -104,7 +100,7 @@ def run_rts():
         wind_engn.create_scenario(args.scenario_count,
                                   wind_site_forecast_futures)
 
-        if args.csv:
+        if not args.pickle:
             wind_engn.write_to_csv(args.out_dir, wind_site_actual_futures,
                                    write_forecasts=True)
 
@@ -118,7 +114,7 @@ def run_rts():
         solar_engn.create_solar_scenario(args.scenario_count,
                                          solar_site_forecast_futures)
 
-        if args.csv:
+        if not args.pickle:
             solar_engn.write_to_csv(args.out_dir,
                                     {'solar': solar_site_actual_futures},
                                     write_forecasts=True)
@@ -161,23 +157,20 @@ def run_rts_joint():
 
     for scenario_start_time in pd.date_range(start=start, periods=args.days,
                                              freq='D', tz='utc'):
-        start_date = scenario_start_time.strftime('%Y-%m-%d')
+        date_lbl = scenario_start_time.strftime('%Y-%m-%d')
 
         scen_timesteps = pd.date_range(start=scenario_start_time,
                                        periods=24, freq='H')
 
-        if start_date == '2020-12-31':
-            break
-
-        if not args.csv:
-            out_fl = Path(args.out_dir, "scens_{}.p.gz".format(start_date))
-
-            if out_fl.exists():
-                continue
-
         if args.verbose >= 1:
             print("Creating RTS-GMLC wind+joint scenarios for: {}".format(
-                scenario_start_time.date()))
+                date_lbl))
+
+        if args.pickle:
+            out_fl = Path(args.out_dir, "scens_{}.p.gz".format(date_lbl))
+
+            if args.skip_existing and out_fl.exists():
+                continue
 
         (load_zone_actual_hists,
             load_zone_actual_futures) = split_actuals_hist_future(
@@ -207,7 +200,7 @@ def run_rts_joint():
         ge.fit(dist / (10 * dist.max()), 5e-2)
         ge.create_scenario(args.scenario_count, wind_site_forecast_futures)
 
-        if args.csv:
+        if not args.pickle:
             ge.write_to_csv(args.out_dir, wind_site_actual_futures,
                             write_forecasts=True)
 
@@ -225,7 +218,7 @@ def run_rts_joint():
                                             load_zone_forecast_futures,
                                             solar_site_forecast_futures)
 
-        if args.csv:
+        if not args.pickle:
             se.write_to_csv(args.out_dir, {'load': load_zone_actual_futures,
                                            'solar': solar_site_actual_futures},
                             write_forecasts=True)

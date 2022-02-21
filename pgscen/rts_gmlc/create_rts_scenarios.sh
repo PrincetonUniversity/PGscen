@@ -54,7 +54,7 @@
 # default command line argument values
 opt_str=""
 scen_cmd="pgscen-rts"
-csv_str=""
+csv_str="--pickle"
 
 # collect command line arguments
 while getopts :i:o:n:m:a:jc var
@@ -66,12 +66,14 @@ do
 	  m)  min_limit=$OPTARG;;
 	  a)  opt_str=$OPTARG;;
 	  j)  scen_cmd="pgscen-rts-joint";;
-	  c)  csv_str="--csv";;
+	  c)  csv_str="";;
 	  [?])  echo "Usage: $0 " \
 	      "[-i] input directory" \
 	      "[-o] output directory" \
 	      "[-n] how many scenarios to generate" \
 	      "[-m] maximum time to run in minutes" \
+	      "[-a] additional Slurm scheduler options" \
+	      "[-j] generate load and solar scenarios jointly?" \
 			exit 1;;
 	esac
 done
@@ -122,12 +124,15 @@ for i in $( seq 1 $ntasks );
 do
   day_str=$( date -d "2020-01-01 + $(( (i - 1) * task_days )) day" $fmt_str )
 
+  # make sure we don't try to generate scenarios for days past 2020-12-31
+  max_days=$(( ($( date +%s -d "2020-12-31" ) - $( date +%s -d "$day_str" )) / 86400 ))
+  use_days=$(( task_days < max_days ? task_days : max_days ))
+
   day_jobs+=($( sbatch --job-name=rts-scens --time=$use_time $opt_str --mem-per-cpu=2G \
                        --wrap=" $scen_cmd $day_str $task_days \
                                           $in_dir -o $out_dir -n $scen_count \
-                                          $csv_str -v " \
+                                          $csv_str --skip-existing -v " \
                        --parsable \
                        --output=$out_dir/slurm_${day_str}.out \
                        --error=$out_dir/slurm_${day_str}.err ))
 done
-
