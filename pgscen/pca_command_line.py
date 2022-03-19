@@ -8,7 +8,7 @@ import bz2
 import dill as pickle
 import time
 
-from .utils.data_utils import (load_solar_data,
+from .utils.data_utils import (load_solar_data, load_load_data,
                                split_actuals_hist_future,
                                split_forecasts_hist_future)
 from .pca import PCAGeminiEngine
@@ -94,3 +94,75 @@ def run_solar():
 
         print("Created {} solar scenarios for {} {} in {:.1f} seconds".format(
             args.scenario_count, args.days, day_str, time.time() - t0))
+
+
+def run_load_solar():
+
+    parser = argparse.ArgumentParser(
+        'pgscen-pca-load-solar', parents=[parent_parser],
+        description="Create day ahead solar scenarios."
+        )
+
+    args = parser.parse_args()
+    start = ' '.join([args.start, "06:00:00"])
+
+    if args.test:
+        with bz2.BZ2File(Path(test_path, "solar.p.gz"), 'r') as f:
+            (solar_site_actual_df, solar_site_forecast_df,
+                solar_meta_df) = pickle.load(f)
+
+    else:
+        (load_zone_actual_df, load_zone_forecast_df) = load_load_data()
+
+        (solar_site_actual_df, solar_site_forecast_df,
+            solar_meta_df) = load_solar_data()
+
+    if args.verbose >= 2:
+        t0 = time.time()
+
+    for scenario_start_time in pd.date_range(start=start, periods=args.days,
+                                             freq='D', tz='utc'):
+        if args.verbose >= 1:
+            print("Creating solar scenarios for: {}".format(
+                scenario_start_time.date()))
+
+        scen_timesteps = pd.date_range(start=scenario_start_time,
+                                       periods=24, freq='H')
+
+        (load_zone_actual_hists,
+            load_zone_actual_futures) = split_actuals_hist_future(
+                    load_zone_actual_df, scen_timesteps)
+        (load_zone_forecast_hists,
+            load_zone_forecast_futures) = split_forecasts_hist_future(
+                    load_zone_forecast_df, scen_timesteps)
+
+        (solar_site_actual_hists,
+            solar_site_actual_futures) = split_actuals_hist_future(
+                    solar_site_actual_df, scen_timesteps)
+        (solar_site_forecast_hists,
+            solar_site_forecast_futures) = split_forecasts_hist_future(
+                    solar_site_forecast_df, scen_timesteps)
+
+        se = PCAGeminiEngine(solar_site_actual_hists,
+                               solar_site_forecast_hists,
+                               scenario_start_time, solar_meta_df)
+
+        dist = se.asset_distance().values
+
+        se.fit_load_solar_joint_model(num_of_components=12, asset_rho=dist/(10*dist.max()), 
+                               horizon_rho=5e-2, load_hist_actual_df=load_zone_actual_hists, 
+                               load_hist_forecast_df=load_zone_forecast_hists)
+        se.create_load_solar_joint_scenario(args.scenario_count, load_zone_forecast_futures, solar_site_forecast_futures)
+        se.write_to_csv(args.out_dir, {'load':load_zone_actual_futures, 'solar':solar_site_actual_futures},
+                        write_forecasts=True)
+        
+
+    if args.verbose >= 2:
+        if args.days == 1:
+            day_str = "day"
+        else:
+            day_str = "days"
+
+        print("Created {} solar scenarios for {} {} in {:.1f} seconds".format(
+            args.scenario_count, args.days, day_str, time.time() - t0))
+

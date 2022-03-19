@@ -256,7 +256,6 @@ class PCAGeminiEngine(GeminiEngine):
         joint_md.generate_gauss_scenarios(nscen)
         
         horizon_shift = joint_md.forecast_lead_hours - self.forecast_lead_hours
-        print(horizon_shift)
         
         load_joint_scen_df = pd.DataFrame({
             (zone,
