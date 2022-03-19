@@ -81,7 +81,7 @@ def run_solar():
                                scenario_start_time, solar_meta_df)
 
         dist = se.asset_distance().values
-        se.fit(10, dist / (10 * dist.max()), 5e-2)
+        se.fit(num_of_components=12, asset_rho=dist/(10*dist.max()), horizon_rho=5e-2)
         se.create_scenario(args.scenario_count, solar_site_forecast_futures)
         se.write_to_csv(args.out_dir, {'solar': solar_site_actual_futures},
                         write_forecasts=True)
