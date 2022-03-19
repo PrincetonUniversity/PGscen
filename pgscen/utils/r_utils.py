@@ -226,6 +226,15 @@ def qdist(dist: Union[GPD, ecdf], x: np.array) -> np.array:
         raise(RuntimeError('Unrecognized distribution class {}'.format(
             tuple(dist.rclass))))
     
+def standardize(df, ignore_pointmass=True):
+    m, s = df.mean(), df.std()
+    if ignore_pointmass:
+        s[s<1e-2] = 1.
+    else:
+        if (s < 1e-2).any():
+            raise(RuntimeError(f'encount point masses in columns {s[s<1e-2].index.tolist()}'))
+    return m, s, (df - m) / s
+
 
 def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
     """Transform the data to fit a Gaussian distribution."""
