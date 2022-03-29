@@ -24,6 +24,20 @@ splines = importr('splines')
 stats = importr('stats')
 
 
+class ecdf(object):
+    """
+    class object to store emperical CDF (ECDF) 
+    """
+
+    def __init__(self, data, n=1000):
+        self.rclass = ['ecdf']
+        self.data = data
+        self.ecdf = stats.ecdf(robjects.FloatVector(data))
+
+        # Linear interpolation of quantile function
+        xx = robjects.FloatVector(np.linspace(0,1,n+1))
+        self.quantfun = stats.approxfun(xx, stats.quantile(self.ecdf, xx))
+
 def point_mass(data: np.array, masspt: float, threshold: float = 0.05) -> bool:
     """
     Check if the input data has a point mass at a location
@@ -155,7 +169,7 @@ def qgpd(dist: GPD, x: np.array) -> np.array:
         return ff(x)
     
 
-def fit_dist(data: np.array) -> Union[GPD, ECDF]:
+def fit_dist(data: np.array) -> Union[GPD, ecdf]:
     """Fit a distribution (GPD or the emperical distribution) function."""
 
     # perturb the data if it has a point mass at zero
@@ -175,27 +189,29 @@ def fit_dist(data: np.array) -> Union[GPD, ECDF]:
             warnings.warn(f'{tail} tail has been detected, but unable to fit '
                           f'GPD, using ECDF instead', RuntimeWarning)
 
-            return stats.ecdf(robjects.FloatVector(data))
+            # return stats.ecdf(robjects.FloatVector(data))
+            return ecdf(data)
 
     else:
-        return stats.ecdf(robjects.FloatVector(data))
+        # return stats.ecdf(robjects.FloatVector(data))
+        return ecdf(data)
 
 
-def pdist(dist: Union[GPD, ECDF], x: np.array) -> np.array:
+def pdist(dist: Union[GPD, ecdf], x: np.array) -> np.array:
     """Evaluate a CDF function."""
 
     if tuple(dist.rclass)[0][0:3] == 'gpd':
         return np.array(Rsafd.pgpd(dist,robjects.FloatVector(x)))
 
     elif tuple(dist.rclass)[0] == 'ecdf':
-        return np.array(dist(robjects.FloatVector(x)))
+        return np.array(dist.ecdf(robjects.FloatVector(x)))
 
     else:
         raise(RuntimeError('Unrecognized distribution class {}'.format(
             tuple(dist.rclass))))
     
 
-def qdist(dist: Union[GPD, ECDF], x: np.array) -> np.array:
+def qdist(dist: Union[GPD, ecdf], x: np.array) -> np.array:
     """Compute the quantiles of the distribution."""
 
     if tuple(dist.rclass)[0][0:3]=='gpd':
@@ -204,12 +220,21 @@ def qdist(dist: Union[GPD, ECDF], x: np.array) -> np.array:
 
     elif tuple(dist.rclass)[0] == 'ecdf':
         # Empirical CDF
-        return stats.quantile(dist,robjects.FloatVector(x))
+        return stats.quantile(dist.ecdf,robjects.FloatVector(x))
 
     else:
         raise(RuntimeError('Unrecognized distribution class {}'.format(
             tuple(dist.rclass))))
     
+def standardize(df, ignore_pointmass=True):
+    m, s = df.mean(), df.std()
+    if ignore_pointmass:
+        s[s<1e-2] = 1.
+    else:
+        if (s < 1e-2).any():
+            raise(RuntimeError(f'encount point masses in columns {s[s<1e-2].index.tolist()}'))
+    return m, s, (df - m) / s
+
 
 def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
     """Transform the data to fit a Gaussian distribution."""
@@ -220,13 +245,33 @@ def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
     for col in df.columns:
         data = np.ascontiguousarray(df[col].values)
 
-        dist_dict[col] = stats.ecdf(data)
-        unif_df[col] = np.array(dist_dict[col](robjects.FloatVector(data)))
+        # dist_dict[col] = stats.ecdf(data)
+        # unif_df[col] = np.array(dist_dict[col](robjects.FloatVector(data)))
+
+        dist_dict[col] = ecdf(data)
+        unif_df[col] = np.array(dist_dict[col].ecdf(robjects.FloatVector(data)))
 
     unif_df.clip(lower=1e-5, upper=0.99999, inplace=True)
     gauss_df = unif_df.apply(norm.ppf)
 
     return dist_dict, gauss_df
+
+# def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
+#     """Transform the data to fit a Gaussian distribution."""
+
+#     unif_df = pd.DataFrame(columns=df.columns,index=df.index)
+#     dist_dict = dict()
+
+#     for col in df.columns:
+#         data = np.ascontiguousarray(df[col].values)
+
+#         dist_dict[col] = fit_dist(data)
+#         unif_df[col] = np.array(pdist(dist_dict[col],data))
+
+#     unif_df.clip(lower=1e-5, upper=0.99999, inplace=True)
+#     gauss_df = unif_df.apply(norm.ppf)
+
+#     return dist_dict, gauss_df
 
 
 def graphical_lasso(df: pd.DataFrame, m: int, rho: float):
@@ -318,3 +363,16 @@ def gemini(df: pd.DataFrame,
 def get_ecdf_data(cdf: ECDF) -> np.array:
     return stats.knots(cdf)
 
+
+# Beta distribution
+
+envstats = importr('EnvStats')
+
+def ebeta(data):
+    beta = envstats.ebeta(robjects.FloatVector(data))
+    d = dict(zip(beta.names, list(beta)))
+    a,b = d['parameters'][0], d['parameters'][1]
+    return a, b
+
+def dbeta(p, a, b):
+    return np.array(stats.dbeta(robjects.FloatVector(p), a, b))

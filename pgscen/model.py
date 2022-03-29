@@ -10,7 +10,7 @@ import rpy2
 from typing import List, Dict, Tuple, Iterable, Optional
 
 from pgscen.utils.r_utils import (qdist, gaussianize, graphical_lasso, gemini,
-                                  fit_dist, get_ecdf_data)
+                                  fit_dist, get_ecdf_data, standardize)
 
 
 def get_asset_list(hist_actual_df : pd.DataFrame,
@@ -247,20 +247,25 @@ class GeminiModel(object):
                     self.hist_dev_df.index.isin(dev_index)]
 
             # normalize historical deviations using Gaussian distribution
-            gpd_dict, self.gauss_df = gaussianize(self.hist_dev_df)
+            gpd_dict, gauss_df = gaussianize(self.hist_dev_df)
             self.gpd_dict = {
                 (asset, timestep): gpd_dict[asset, horizon]
                 for asset in self.asset_list
                 for horizon, timestep in enumerate(self.scen_timesteps)
                 }
 
+            # standardize gaussians
+            self.gauss_mean, self.gauss_std, self.gauss_df = standardize(gauss_df)
+
+            self.num_of_assets = len(self.asset_list)
+            
         # if normalized historical deviations are given, just use those
         elif gauss_df is not None:
             self.gauss = True
-            self.asset_list = gauss_df.columns.levels[0]
+            self.asset_list = gauss_df.columns.get_level_values(0)[::self.num_of_horizons]
             self.gauss_df = gauss_df
+            self.num_of_assets = len(self.asset_list)
 
-        self.num_of_assets = len(self.asset_list)
         self.asset_cov = None
         self.horizon_cov = None
         self.scen_gauss_df = None
@@ -394,8 +399,10 @@ class GeminiModel(object):
                             asset_df.loc[idx, 'Deviation'].values)
 
                 elif asset_type == 'solar':
-                    hist_dev_data = get_ecdf_data(
-                        self.gpd_dict[asset, timestep])
+                    # hist_dev_data = get_ecdf_data(
+                    #     self.gpd_dict[asset, timestep])
+
+                    hist_dev_data = self.gpd_dict[asset, timestep].data
                     hist_dev_range = np.max(
                         hist_dev_data) - np.min(hist_dev_data)
 
@@ -491,6 +498,12 @@ class GeminiModel(object):
             )
 
         self.scen_gauss_df = scen_df.copy()
+
+        # add back mean and stad
+        if not self.gauss:
+            scen_df = scen_df * self.gauss_std + self.gauss_mean
+            self.scen_gauss_bias_df = scen_df.copy()
+
         scen_df.columns = pd.MultiIndex.from_tuples(
             scen_df.columns).set_levels(self.scen_timesteps, level=1)
 
