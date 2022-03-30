@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import numpy as np
 import pandas as pd
+
 from datetime import datetime
 from operator import itemgetter
 from astral import Observer
@@ -14,7 +15,7 @@ from .model import get_asset_list, GeminiModel, GeminiError
 from .utils.solar_utils import overlap, get_yearly_date_range
 
 
-class GeminiEngine(object):
+class GeminiEngine:
     """
     A class for generating scenarios using asset actuals and forecasts.
 

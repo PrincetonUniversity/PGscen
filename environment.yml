@@ -1,9 +1,8 @@
-name: pgscen-pca
+name: pgscen
 channels:
-  - conda-forge 
+  - conda-forge
 dependencies:
   - python=3.8
-  - pip
   - numpy
   - scipy
   - pandas
@@ -14,13 +13,12 @@ dependencies:
   - seaborn
   - openpyxl
   - rpy2
-  - h5py
   - geopandas
-  - shapely
   - ipywidgets
   - r-essentials=4.0
   - r-glasso
   - r-qgraph
+  - r-envstats
   - r-robustbase
   - r-rgl
   - r-quantreg
@@ -31,4 +29,3 @@ dependencies:
   - r-plot3d
   - pip:
     - astral
-

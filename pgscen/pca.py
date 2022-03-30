@@ -1,25 +1,20 @@
-from datetime import timedelta
-from os import times
-from token import OP
-from pgscen.model import GeminiModel
-from pgscen.engine import GeminiEngine
 
 import numpy as np
 import pandas as pd
 
-import warnings
-from scipy.linalg import sqrtm, null_space
+from scipy.linalg import sqrtm
 from scipy.stats import norm
+from sklearn.decomposition import PCA
+from astral import LocationInfo
+from astral.sun import sun
 from typing import List, Dict, Tuple, Iterable, Optional
 
-from pgscen.utils.r_utils import (qdist, gaussianize, graphical_lasso, gemini, 
-                                  fit_dist, get_ecdf_data, ecdf, standardize)
-from pgscen.utils.solar_utils import (get_yearly_date_range, get_asset_trans_hour_info)
+from .model import GeminiModel
+from .engine import GeminiEngine
+from .utils.r_utils import qdist, graphical_lasso, gemini, ecdf, standardize
+from .utils.solar_utils import (get_yearly_date_range,
+                                get_asset_trans_hour_info)
 
-import sklearn
-from sklearn.decomposition import PCA        
-from astral import LocationInfo   
-from astral.sun import sun
 
 class PCAGeminiEngine(GeminiEngine):
 
@@ -37,11 +32,13 @@ class PCAGeminiEngine(GeminiEngine):
                          forecast_resolution_in_minute, num_of_horizons,
                          forecast_lead_time_in_hour)
 
-        ################### Compute transitional hour delay time #########################
+        ############# Compute transitional hour delay time ####################
 
         print('computing hour delay time....')
 
-        hist_dates = solar_hist_forecast_df.groupby('Issue_time').head(1)['Forecast_time'].tolist()
+        hist_dates = solar_hist_forecast_df.groupby(
+            'Issue_time').head(1).Forecast_time.dt.date.tolist()
+
         delay_dict = dict()
         hist_sun_dict = dict()
 
@@ -52,13 +49,13 @@ class PCAGeminiEngine(GeminiEngine):
 
             act_df = solar_hist_actual_df[asset]
             fcst_df = solar_hist_forecast_df.set_index('Forecast_time')[asset]
-            
+
             sunrise_data,sunset_data = [],[]
             day_data = {'Time':[], 'Actual':[], 'Forecast':[], 'Deviation':[]}
 
             for date in hist_dates:
-                trans = get_asset_trans_hour_info(loc,date)
-                
+                trans = get_asset_trans_hour_info(loc, date)
+
                 # Sunrise
                 sunrise_dict = trans['sunrise']
                 sunrise_time,sunrise_active,sunrise_horizon = sunrise_dict['time'],\
@@ -66,7 +63,7 @@ class PCAGeminiEngine(GeminiEngine):
                 act = act_df.loc[sunrise_horizon]
                 fcst = fcst_df.loc[sunrise_horizon]
                 sunrise_data.append([sunrise_time,sunrise_horizon,act,fcst,act-fcst,sunrise_active])
-                
+
                 # Sunset
                 sunset_dict = trans['sunset']
                 sunset_time,sunset_active,sunset_horizon = sunset_dict['time'],\
@@ -83,64 +80,61 @@ class PCAGeminiEngine(GeminiEngine):
                 day_data['Forecast'] += fcst.values.tolist()
                 day_data['Deviation'] += (act-fcst).values.tolist()
 
-
-
             sunrise_df = pd.DataFrame(data=sunrise_data,
                                     columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
             sunset_df = pd.DataFrame(data=sunset_data,
                                     columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
             day_df = pd.DataFrame(day_data).set_index('Time')
-            
-            hist_sun_dict[asset] = {'sunrise':sunrise_df, 'sunset':sunset_df, 'day':day_df,}
+
+            hist_sun_dict[asset] = {'sunrise': sunrise_df, 'sunset': sunset_df,
+                                    'day': day_df}
 
             # Figure out delay times
             for m in range(60):
                 if sunrise_df[sunrise_df['Active Minutes']==m]['Actual'].sum()>0:
-                    sunrise_delay_in_minutes = m-1
+                    sunrise_delay_in_minutes = m - 1
                     break
-                    
+
             for m in range(60):
                 if sunset_df[sunset_df['Active Minutes']==m]['Actual'].sum()>0:
-                    sunset_delay_in_minutes = m-1
-                    break 
-                    
-            delay_dict[asset] = {'sunrise':sunrise_delay_in_minutes,'sunset':sunset_delay_in_minutes}
-        
+                    sunset_delay_in_minutes = m - 1
+                    break
+
+            delay_dict[asset] = {'sunrise': sunrise_delay_in_minutes,
+                                 'sunset': sunset_delay_in_minutes}
+
         self.hist_sun_info = hist_sun_dict
         self.trans_delay = delay_dict
-
 
         ################################### Compute transitional hour statistics ######################
 
         trans_horizon_dict = {'sunrise':{},'sunset':{}}
-        
+
         for asset,row in self.meta_df.iterrows():
-            
+
             lat = row['latitude']
             lon = row['longitude']
             loc = LocationInfo(asset,'Texas','USA',lat,lon)
-            
+
             sunrise_delay_in_minutes = self.trans_delay[asset]['sunrise']
-            sunset_delay_in_minutes = self.trans_delay[asset]['sunset']   
+            sunset_delay_in_minutes = self.trans_delay[asset]['sunset']
 
             ################# Get scenario date transitional hour timestep ###############
             trans = get_asset_trans_hour_info(loc,self.scen_start_time.floor('D'),
                                             sunrise_delay_in_minutes=sunrise_delay_in_minutes,
                                             sunset_delay_in_minutes=sunset_delay_in_minutes)
-            
+
             trans_horizon_dict['sunrise'][asset] = {'timestep':trans['sunrise']['timestep'],'active':trans['sunrise']['active']}
             trans_horizon_dict['sunset'][asset] = {'timestep':trans['sunset']['timestep'],'active':trans['sunset']['active']}
 
         self.trans_horizon = trans_horizon_dict
 
-
-
-    def fit(self, num_of_components: int, asset_rho: float, horizon_rho: float, 
+    def fit(self, num_of_components: int, asset_rho: float, horizon_rho: float,
                 nearest_days: int = 50) -> None:
-        
+
         # Need to localize historical data?
-        days = get_yearly_date_range(self.scen_start_time, 
-            end=self.hist_forecast_df['Forecast_time'].max().strftime('%Y-%m-%d'), 
+        days = get_yearly_date_range(self.scen_start_time,
+            end=self.hist_forecast_df['Forecast_time'].max().strftime('%Y-%m-%d'),
             num_of_days=nearest_days)
         dev_index = [d+pd.Timedelta(6,unit='H') for d in days]
 
@@ -157,23 +151,23 @@ class PCAGeminiEngine(GeminiEngine):
                         ) -> None:
 
         self.model.get_forecast(forecast_df)
-        self.model.generate_gauss_pca_scenarios(self.trans_horizon, 
-            self.hist_sun_info, nscen, upper_dict=self.meta_df.AC_capacity_MW)
+        self.model.generate_gauss_pca_scenarios(self.trans_horizon,
+            self.hist_sun_info, nscen, upper_dict=self.meta_df.Capacity)
 
         self.scenarios[self.asset_type] = self.model.scen_df
         self.forecasts[self.asset_type] = self.get_forecast(forecast_df)
 
-    def fit_load_solar_joint_model(self, num_of_components: int, asset_rho: float, 
-            horizon_rho: float, load_hist_actual_df: pd.DataFrame, 
+    def fit_load_solar_joint_model(self, num_of_components: int, asset_rho: float,
+            horizon_rho: float, load_hist_actual_df: pd.DataFrame,
             load_hist_forecast_df: pd.DataFrame,
             nearest_days : int = 50) -> None:
 
         # Need to localize historical data?
-        days = get_yearly_date_range(self.scen_start_time, 
-            end=self.hist_forecast_df['Forecast_time'].max().strftime('%Y-%m-%d'), 
+        days = get_yearly_date_range(self.scen_start_time,
+            end=self.hist_forecast_df['Forecast_time'].max().strftime('%Y-%m-%d'),
             num_of_days=nearest_days)
         dev_index = [d+pd.Timedelta(6,unit='H') for d in days]
-        
+
         # Fit solar asset-level model
         solar_md = PCAGeminiModel(self.scen_start_time, self.get_hist_df_dict(),
                                  None, dev_index,
@@ -189,7 +183,7 @@ class PCAGeminiEngine(GeminiEngine):
         dev_index = solar_md.hist_dev_df.index
 
         # Fit load model to get deviations
-        load_md = GeminiModel(self.scen_start_time, 
+        load_md = GeminiModel(self.scen_start_time,
                                  {'actual': load_hist_actual_df, 'forecast': load_hist_forecast_df},
                                  None, dev_index,
                                  self.forecast_resolution_in_minute,
@@ -204,12 +198,12 @@ class PCAGeminiEngine(GeminiEngine):
         # Determine zonal solar active horizons
         west = self.meta_df.sort_values(['longitude', 'latitude'], ascending=[True, True]).iloc[0,]
         asset, lon, lat = west._name, west['longitude'], west['latitude']
-        joint_model_start = pd.to_datetime(max([sun(LocationInfo('west', 'Texas', 'USA', lat, lon).observer, 
+        joint_model_start = pd.to_datetime(max([sun(LocationInfo('west', 'Texas', 'USA', lat, lon).observer,
             date=dt)['sunrise'] for dt in dev_index])) + pd.Timedelta(60+self.trans_delay[asset]['sunrise'], unit='m')
 
         east = self.meta_df.sort_values(['longitude', 'latitude'], ascending=[False, True]).iloc[0,]
         asset, lon, lat = east._name, east['longitude'], east['latitude']
-        joint_model_end = pd.to_datetime(min([sun(LocationInfo('east', 'Texas', 'USA', lat, lon).observer, 
+        joint_model_end = pd.to_datetime(min([sun(LocationInfo('east', 'Texas', 'USA', lat, lon).observer,
             date=dt)['sunset'] for dt in dev_index])) - pd.Timedelta(60+self.trans_delay[asset]['sunset'], unit='m')
 
         joint_model_start_hour, joint_model_end_hour = joint_model_start.floor('H').hour, joint_model_end.floor('H').hour
@@ -219,7 +213,7 @@ class PCAGeminiEngine(GeminiEngine):
         joint_model_horizon_end = self.scen_timesteps.index(joint_model_end_timestep)
 
         # Zonal load
-        joint_load_df = load_md.gauss_df[[(asset, i) for asset in self.load_md.asset_list 
+        joint_load_df = load_md.gauss_df[[(asset, i) for asset in self.load_md.asset_list
             for i in range(joint_model_horizon_start, joint_model_horizon_end+1)]]
 
         # Aggreate solar to zonal-level
@@ -234,7 +228,7 @@ class PCAGeminiEngine(GeminiEngine):
         joint_md_forecast_lead_hours = self.forecast_lead_hours + \
                 int((joint_model_start_timestep - self.scen_start_time) / \
                 pd.Timedelta(self.forecast_resolution_in_minute, unit='min'))
-        joint_md = GeminiModel(self.scen_start_time, 
+        joint_md = GeminiModel(self.scen_start_time,
                                 None,
                                 joint_load_df.merge(solar_zone_gauss_df, how='inner',
                                     left_index=True, right_index=True),
@@ -243,20 +237,22 @@ class PCAGeminiEngine(GeminiEngine):
                                 joint_model_horizon_end-joint_model_horizon_start+1,
                                 joint_md_forecast_lead_hours)
         joint_md.fit(1e-2, 1e-2)
+
         self.joint_md = joint_md
 
-
-    def create_load_solar_joint_scenario(self, nscen, load_forecast_df, solar_forecast_df):
+    def create_load_solar_joint_scenario(self,
+                                         nscen,
+                                         load_forecast_df, solar_forecast_df):
 
         solar_md = self.solar_md
         load_md = self.load_md
         joint_md = self.joint_md
-        
+
         # Generate joint scenarios
         joint_md.generate_gauss_scenarios(nscen)
-        
+
         horizon_shift = joint_md.forecast_lead_hours - self.forecast_lead_hours
-        
+
         load_joint_scen_df = pd.DataFrame({
             (zone,
             horizon_shift + horizon): joint_md.scen_gauss_df[(zone, horizon)]
@@ -264,14 +260,14 @@ class PCAGeminiEngine(GeminiEngine):
             for horizon in range(joint_md.num_of_horizons)
             if not zone.startswith('Solar_')
             })
-        
+
 
         solar_joint_scen_df = joint_md.scen_gauss_df[
             [(zone, horizon) for zone in joint_md.asset_list
             for horizon in range(joint_md.num_of_horizons)
             if zone.startswith('Solar_')]
             ]
-            
+
         # generate daytime scenarios for load assets conditional on
         # the joint model
         load_md.get_forecast(load_forecast_df)
@@ -284,10 +280,11 @@ class PCAGeminiEngine(GeminiEngine):
         sqrtcov, mu = load_md.conditional_multivar_normal_partial_time(
             cond_horizon_start, cond_horizon_end, load_joint_scen_df)
         load_md.generate_gauss_scenarios(nscen, sqrt_cov=sqrtcov, mu=mu)
-        
+
         # generate site-level solar scenarios
         solar_md.get_forecast(solar_forecast_df)
-        
+
+        # (ported conditional_multivar...)
         membership = self.meta_df.groupby('Zone').groups
         aggregates_list = [zone[6:] for zone in solar_joint_scen_df.columns.unique(0).tolist()]
         s_mat = np.zeros((len(aggregates_list), len(solar_md.asset_list)))
@@ -297,9 +294,9 @@ class PCAGeminiEngine(GeminiEngine):
 
             for asset in assets:
                 s_mat[agg_indx, solar_md.asset_list.index(asset)] = 1.
-        
-        U = np.kron(s_mat, 
-                    np.eye(self.num_of_horizons)[horizon_shift:horizon_shift+joint_md.num_of_horizons, :] @ 
+
+        U = np.kron(s_mat,
+                    np.eye(self.num_of_horizons)[horizon_shift:horizon_shift+joint_md.num_of_horizons, :] @
                     solar_md.pca.components_.T) @ np.diag(solar_md.pca_gauss_std.values)
         b = (solar_joint_scen_df.values - U @ solar_md.pca_gauss_mean).T
         sigma = np.kron(solar_md.asset_cov, solar_md.horizon_cov)
@@ -307,15 +304,14 @@ class PCAGeminiEngine(GeminiEngine):
         A = np.eye(solar_md.num_of_components * solar_md.num_of_assets) - C @ U
         sqrtcov = sqrtm(A @ sigma @ A.T).real
         mu = C @ b
-        
+
         solar_md.generate_gauss_pca_scenarios(self.trans_horizon,
                 self.hist_sun_info,
                 nscen,
                 sqrtcov=sqrtcov,
                 mu=mu,
-                upper_dict=self.meta_df.AC_capacity_MW
+                upper_dict=self.meta_df.Capacity
                 )
-
 
         # save the generated scenarios and the forecasted asset values for the
         # same time points
@@ -325,10 +321,8 @@ class PCAGeminiEngine(GeminiEngine):
         self.forecasts['solar'] = self.get_forecast(solar_forecast_df)
 
 
-
 class PCAGeminiModel(GeminiModel):
-    
-    
+
     def __init__(self,
                  scen_start_time: pd.Timestamp,
                  hist_dfs: Optional[Dict[str, pd.DataFrame]] = None,
@@ -345,7 +339,6 @@ class PCAGeminiModel(GeminiModel):
                     forecast_resolution_in_minute,
                     num_of_horizons,
                     forecast_lead_time_in_hour)
-
 
     def fit_conditional_marginal_dist(self, trans_timestep, hist_dict, actmin_width: int = 5,
                             fcst_width_ratio: float = 0.05) -> None:
@@ -398,7 +391,7 @@ class PCAGeminiModel(GeminiModel):
                                                 <= upper)]
                 else:
                     # Nighttime horizons
-                    selected_df = pd.DataFrame({'Deviation':np.zeros(1000)})    
+                    selected_df = pd.DataFrame({'Deviation':np.zeros(1000)})
 
                 try:
                     data = np.ascontiguousarray(selected_df['Deviation'].values)
@@ -414,21 +407,20 @@ class PCAGeminiModel(GeminiModel):
         self.num_of_hist_data = self.gauss_df.shape[0]
 
         X = np.concatenate([self.gauss_df[[(asset, i) for i in range(self.num_of_horizons)]].values for asset in self.asset_list])
-            
+
         # Fit PCA
         pca = PCA(n_components=num_of_components, svd_solver='full')
         Y = pca.fit_transform(X)
         Z = np.concatenate([Y[i*self.num_of_hist_data:(i+1)*self.num_of_hist_data, :] for i,_ in enumerate(self.asset_list)], axis=1)
-            
-        pca_gauss_df = pd.DataFrame(data = Z, 
+
+        pca_gauss_df = pd.DataFrame(data = Z,
                 columns=pd.MultiIndex.from_tuples([(asset, comp) for asset in self.asset_list
-                    for comp in range(self.num_of_components)]), 
+                    for comp in range(self.num_of_components)]),
                     index=self.gauss_df.index)
 
         self.pca = pca
         self.pca_residual = 1-pca.explained_variance_ratio_.cumsum()[-1]
         self.pca_gauss_mean, self.pca_gauss_std, self.pca_gauss_df = standardize(pca_gauss_df)
-
 
     def fit(self, asset_rho: float, pca_comp_rho: float) -> None:
 
@@ -463,8 +455,7 @@ class PCAGeminiModel(GeminiModel):
             index=pca_comp_indx, columns=pca_comp_indx
             )
 
-
-    def generate_gauss_pca_scenarios(self, 
+    def generate_gauss_pca_scenarios(self,
             trans_timestep,
             hist_dict,
             nscen: int,
@@ -473,7 +464,7 @@ class PCAGeminiModel(GeminiModel):
             lower_dict: Optional[pd.Series] = None,
             upper_dict: Optional[pd.Series] = None
             ) -> None:
-            
+
         if sqrtcov is None:
             sqrtcov = np.kron(sqrtm(self.asset_cov.values).real,
                                 sqrtm(self.horizon_cov.values).real)
@@ -491,16 +482,16 @@ class PCAGeminiModel(GeminiModel):
                 [(asset, horizon) for asset in self.asset_list
                  for horizon in range(self.num_of_components)]
                 )
-            ) 
+            )
         pca_scen_gauss_df = pca_scen_gauss_df * self.pca_gauss_std + self.pca_gauss_mean
         self.pca_scen_gauss_df = pca_scen_gauss_df.copy()
 
         Y = self.pca.inverse_transform(
-            np.concatenate([self.pca_scen_gauss_df[[(asset,c) for c in range(self.num_of_components)]].values 
+            np.concatenate([self.pca_scen_gauss_df[[(asset,c) for c in range(self.num_of_components)]].values
                     for asset in self.asset_list])
                     )
         scen_df = pd.DataFrame(
-            data=np.concatenate([Y[i*nscen:(i+1)*nscen, :] for i in range(self.num_of_assets)], axis=1), 
+            data=np.concatenate([Y[i*nscen:(i+1)*nscen, :] for i in range(self.num_of_assets)], axis=1),
             columns=pd.MultiIndex.from_tuples(
                     [(asset, horizon) for asset in self.asset_list
                         for horizon in range(self.num_of_horizons)]
@@ -522,7 +513,7 @@ class PCAGeminiModel(GeminiModel):
 
             scen_means, scen_vars = scen_df.mean(), scen_df.std()
 
-            # data considered as point mass if variance < 1e-2 
+            # data considered as point mass if variance < 1e-2
             scen_means[scen_vars<1e-2] = 999999.
             scen_vars[scen_vars<1e-2] = 1.
 

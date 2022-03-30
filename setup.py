@@ -11,8 +11,9 @@ setuptools.setup(
     description="power grid scenario creation platform for "
                 "load and production of wind and solar",
 
-    author='Xinshuo Yang, Michal Grzadkowski',
-    author_email='xy3134@princeton.edu, mgrzad@princeton.edu',
+    author='Xinshuo Yang, Michal Grzadkowski, René Carmona',
+    author_email='xy3134@princeton.edu, mgrzad@princeton.edu, '
+                 'rcarmona@princeton.edu',
 
     packages=['pgscen', 'pgscen.utils', 'pgscen.rts_gmlc'],
     package_data={'pgscen': ['../test/resources/*.p.gz',
