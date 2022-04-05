@@ -292,8 +292,6 @@ class GeminiEngine:
         if not isinstance(actual_dfs, dict):
             actual_dfs = {self.asset_type: actual_dfs}
 
-        # get formatted labels for the scenario time points and start time
-        fmt_timesteps = [ts.strftime('%H%M') for ts in self.scen_timesteps]
         for asset_type, forecast in self.forecasts.items():
             scen_date = str(self.scen_start_time.strftime('%Y%m%d'))
 
@@ -302,63 +300,41 @@ class GeminiEngine:
             if not out_dir.exists():
                 os.makedirs(out_dir)
 
-            # TODO: make these concatenations cleaner
-            # create the output data table
+            # create the output data table for each generator of this type
             for asset in forecast.index.unique(0):
-                df = pd.DataFrame(columns=['Type', 'Index'] + fmt_timesteps)
+                out_rows = list()
 
                 # add the asset actual values for the scenario time points
                 if actual_dfs[asset_type] is not None:
-                    actu_arr = np.reshape(
-                        actual_dfs[asset_type][asset][
-                            (actual_dfs[asset_type][asset].index
-                             >= self.scen_start_time)
-                            & (actual_dfs[asset_type][asset].index
-                               <= self.scen_end_time)
-                            ].sort_index().values,
-                        (1, self.num_of_horizons)
-                        )
-
-                    df = df.append(
-                        pd.concat([pd.DataFrame([['Actual', 1]],
-                                                columns=['Type', 'Index']),
-                                   pd.DataFrame(data=actu_arr,
-                                                columns=fmt_timesteps)],
-                                  axis=1)
-                        )
+                    out_rows += [
+                        pd.concat([
+                            pd.Series(['Actual', 1]),
+                            actual_dfs[asset_type].loc[self.scen_timesteps,
+                                                       asset]
+                            ])
+                        ]
 
                 # add the asset forecast values for the scenario time points
                 if write_forecasts:
-                    df = df.append(
-                        pd.concat([pd.DataFrame([['Forecast', 1]],
-                                                columns=['Type', 'Index']),
-                                   pd.DataFrame(data=forecast[asset].values,
-                                                index=fmt_timesteps).T],
-                                  axis=1)
-                        )
+                    out_rows += [pd.concat([pd.Series(['Forecast', 1]),
+                                            forecast[asset]])]
 
                 # add the asset scenario values
-                scen_count = self.scenarios[asset_type].shape[0]
-                df = df.append(
-                    pd.concat([
-                        pd.DataFrame(
-                            data=np.concatenate(([['Simulation']] * scen_count,
-                                                 [[i + 1]
-                                                  for i in range(scen_count)]),
-                                                axis=1),
-                            columns=['Type', 'Index']
-                            ),
-                        pd.DataFrame(
-                            data=self.scenarios[asset_type][asset].values,
-                            columns=fmt_timesteps
-                            )
-                        ], axis=1)
-                    )
+                for i, (_, scens) in enumerate(
+                        self.scenarios[asset_type][asset].iterrows()):
+                    out_rows += [pd.concat([pd.Series(['Simulation', i + 1]),
+                                            scens])]
+
+                # get formatted labels for the scenario time points
+                out_table = pd.concat(out_rows, axis=1).transpose()
+                out_table.columns = ['Type', 'Index'] + [
+                    ts.strftime('%H%M') for ts in self.scen_timesteps]
+                out_table['Index'] = out_table.Index.astype(int)
 
                 # TODO: round values for more compact storage
                 # save output table to file
                 filename = asset.rstrip().replace(' ', '_') + '.csv'
-                df.to_csv(out_dir / filename, index=False)
+                out_table.to_csv(out_dir / filename, index=False)
 
 
 class SolarGeminiEngine(GeminiEngine):

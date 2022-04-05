@@ -9,6 +9,7 @@ dependencies:
   - dill
   - matplotlib
   - statsmodels
+  - cffi
   - jupyterlab
   - seaborn
   - openpyxl
