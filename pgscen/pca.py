@@ -13,7 +13,7 @@ from .model import GeminiModel
 from .engine import GeminiEngine
 from .utils.r_utils import qdist, graphical_lasso, gemini, ecdf, standardize
 from .utils.solar_utils import (get_yearly_date_range,
-                                get_asset_trans_hour_info)
+                                get_asset_transition_hour_info)
 
 
 class PCAGeminiEngine(GeminiEngine):
@@ -41,93 +41,97 @@ class PCAGeminiEngine(GeminiEngine):
 
         delay_dict = dict()
         hist_sun_dict = dict()
+        sun_fields = ['Time', 'Horizon',
+                      'Actual', 'Forecast', 'Deviation', 'Active Minutes']
 
-        for asset,row in self.meta_df.iterrows():
-            lat = row['latitude']
-            lon = row['longitude']
-            loc = LocationInfo(asset,'Texas','USA',lat,lon)
+        asset_locs = {
+            asset: LocationInfo(asset, 'Texas', 'USA',
+                                asset_data.latitude, asset_data.longitude)
+            for asset, asset_data in self.meta_df.iterrows()
+            }
 
-            act_df = solar_hist_actual_df[asset]
-            fcst_df = solar_hist_forecast_df.set_index('Forecast_time')[asset]
+        for asset, actl_vals in solar_hist_actual_df.iteritems():
+            fcst_vals = solar_hist_forecast_df.set_index(
+                'Forecast_time')[asset]
 
-            sunrise_data,sunset_data = [],[]
-            day_data = {'Time':[], 'Actual':[], 'Forecast':[], 'Deviation':[]}
+            sunrise_data, sunset_data = list(), list()
+            day_data = {'Time': list(), 'Actual': list(),
+                        'Forecast': list(), 'Deviation': list()}
 
-            for date in hist_dates:
-                trans = get_asset_trans_hour_info(loc, date)
+            for hist_date in hist_dates:
+                trans_info = get_asset_transition_hour_info(asset_locs[asset],
+                                                            hist_date)
 
-                # Sunrise
-                sunrise_dict = trans['sunrise']
-                sunrise_time,sunrise_active,sunrise_horizon = sunrise_dict['time'],\
-                    sunrise_dict['active'],sunrise_dict['timestep']
-                act = act_df.loc[sunrise_horizon]
-                fcst = fcst_df.loc[sunrise_horizon]
-                sunrise_data.append([sunrise_time,sunrise_horizon,act,fcst,act-fcst,sunrise_active])
+                # sunrise
+                sunrise_actl = actl_vals[trans_info['sunrise']['timestep']]
+                sunrise_fcst = fcst_vals[trans_info['sunrise']['timestep']]
 
-                # Sunset
-                sunset_dict = trans['sunset']
-                sunset_time,sunset_active,sunset_horizon = sunset_dict['time'],\
-                    sunset_dict['active'],sunset_dict['timestep']
-                act = act_df.loc[sunset_horizon]
-                fcst = fcst_df.loc[sunset_horizon]
-                sunset_data.append([sunset_time,sunset_horizon,act,fcst,act-fcst,sunset_active])
+                sunrise_data.append([trans_info['sunrise']['time'],
+                                     trans_info['sunrise']['timestep'],
+                                     sunrise_actl, sunrise_fcst,
+                                     sunrise_actl - sunrise_fcst,
+                                     trans_info['sunrise']['active']])
 
-                # Daytime
-                act = act_df[(act_df.index>sunrise_horizon) & (act_df.index<sunset_horizon)].sort_index()
-                fcst = fcst_df[(fcst_df.index>sunrise_horizon) & (fcst_df.index<sunset_horizon)].sort_index()
-                day_data['Time'] += act.index.tolist()
-                day_data['Actual'] += act.values.tolist()
-                day_data['Forecast'] += fcst.values.tolist()
-                day_data['Deviation'] += (act-fcst).values.tolist()
+                # sunset
+                sunset_actl = actl_vals[trans_info['sunset']['timestep']]
+                sunset_fcst = fcst_vals[trans_info['sunset']['timestep']]
 
-            sunrise_df = pd.DataFrame(data=sunrise_data,
-                                    columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
-            sunset_df = pd.DataFrame(data=sunset_data,
-                                    columns=['Time','Horizon','Actual','Forecast','Deviation','Active Minutes'])
+                sunset_data.append([trans_info['sunset']['time'],
+                                    trans_info['sunset']['timestep'],
+                                    sunset_actl, sunset_fcst,
+                                    sunset_actl - sunset_fcst,
+                                    trans_info['sunset']['active']])
+
+                # daytime
+                day_actls = actl_vals[
+                    (actl_vals.index > trans_info['sunrise']['timestep'])
+                    & (actl_vals.index < trans_info['sunset']['timestep'])
+                    ].sort_index()
+
+                day_fcsts = fcst_vals[
+                    (fcst_vals.index > trans_info['sunrise']['timestep'])
+                    & (fcst_vals.index < trans_info['sunset']['timestep'])
+                    ].sort_index()
+
+                day_data['Time'] += day_actls.index.tolist()
+                day_data['Actual'] += day_actls.values.tolist()
+                day_data['Forecast'] += day_fcsts.values.tolist()
+                day_data['Deviation'] += list(day_actls - day_fcsts)
+
+            sunrise_df = pd.DataFrame(data=sunrise_data, columns=sun_fields)
+            sunset_df = pd.DataFrame(data=sunset_data, columns=sun_fields)
             day_df = pd.DataFrame(day_data).set_index('Time')
+
+            # figure out delay times
+            delay_dict[asset] = {
+                'sunrise': sunrise_df.groupby(
+                    'Active Minutes')['Actual'].any().idxmax() - 1,
+                'sunset': sunset_df.groupby(
+                    'Active Minutes')['Actual'].any().idxmax() - 1
+                }
 
             hist_sun_dict[asset] = {'sunrise': sunrise_df, 'sunset': sunset_df,
                                     'day': day_df}
 
-            # Figure out delay times
-            for m in range(60):
-                if sunrise_df[sunrise_df['Active Minutes']==m]['Actual'].sum()>0:
-                    sunrise_delay_in_minutes = m - 1
-                    break
+        ################ Compute transitional hour statistics #################
 
-            for m in range(60):
-                if sunset_df[sunset_df['Active Minutes']==m]['Actual'].sum()>0:
-                    sunset_delay_in_minutes = m - 1
-                    break
-
-            delay_dict[asset] = {'sunrise': sunrise_delay_in_minutes,
-                                 'sunset': sunset_delay_in_minutes}
-
-        self.hist_sun_info = hist_sun_dict
         self.trans_delay = delay_dict
+        self.hist_sun_info = hist_sun_dict
 
-        ################################### Compute transitional hour statistics ######################
+        asset_horizons = {
+            asset: get_asset_transition_hour_info(
+                loc, self.scen_start_time.floor('D'),
+                delay_dict[asset]['sunrise'], delay_dict[asset]['sunset']
+                )
+            for asset, loc in asset_locs.items()
+            }
 
-        trans_horizon_dict = {'sunrise':{},'sunset':{}}
-
-        for asset,row in self.meta_df.iterrows():
-
-            lat = row['latitude']
-            lon = row['longitude']
-            loc = LocationInfo(asset,'Texas','USA',lat,lon)
-
-            sunrise_delay_in_minutes = self.trans_delay[asset]['sunrise']
-            sunset_delay_in_minutes = self.trans_delay[asset]['sunset']
-
-            ################# Get scenario date transitional hour timestep ###############
-            trans = get_asset_trans_hour_info(loc,self.scen_start_time.floor('D'),
-                                            sunrise_delay_in_minutes=sunrise_delay_in_minutes,
-                                            sunset_delay_in_minutes=sunset_delay_in_minutes)
-
-            trans_horizon_dict['sunrise'][asset] = {'timestep':trans['sunrise']['timestep'],'active':trans['sunrise']['active']}
-            trans_horizon_dict['sunset'][asset] = {'timestep':trans['sunset']['timestep'],'active':trans['sunset']['active']}
-
-        self.trans_horizon = trans_horizon_dict
+        self.trans_horizon = {
+            'sunrise': {asset: horizons['sunrise']
+                        for asset, horizons in asset_horizons.items()},
+            'sunset': {asset: horizons['sunset']
+                       for asset, horizons in asset_horizons.items()}
+            }
 
     def fit(self, num_of_components: int, asset_rho: float, horizon_rho: float,
                 nearest_days: int = 50) -> None:
