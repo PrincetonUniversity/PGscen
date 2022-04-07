@@ -355,19 +355,88 @@ class PCAGeminiModel(GeminiModel):
                  num_of_horizons: int = 24,
                  forecast_lead_time_in_hour: int = 12) -> None:
 
-        super().__init__(scen_start_time,
-                    hist_dfs,
-                    gauss_df,
-                    dev_index,
-                    forecast_resolution_in_minute,
-                    num_of_horizons,
-                    forecast_lead_time_in_hour)
+        super().__init__(scen_start_time, hist_dfs, gauss_df, dev_index,
+                         forecast_resolution_in_minute, num_of_horizons,
+                         forecast_lead_time_in_hour)
 
-    def fit_conditional_marginal_dist(self, trans_timestep, hist_dict, actmin_width: int = 5,
-                            fcst_width_ratio: float = 0.05) -> None:
-        """
-        Fit marginal distribution conditional on the forecast or active minutes
-        """
+        self.num_of_components = None
+        self.num_of_hist_data = self.gauss_df.shape[0]
+
+        self.pca = None
+        self.pca_residual = None
+        self.pca_gauss_mean = None
+        self.pca_gauss_std = None
+        self.pca_gauss_df = None
+
+    def pca_transform(self, num_of_components: int) -> None:
+        """Reduce number of dimensions by applying a PCA transformation."""
+
+        asset_days = self.gauss_df[[(asset, i)
+                                    for i in range(self.num_of_horizons)
+                                    for asset in self.asset_list]]
+        asset_days = asset_days.unstack().unstack('Time').values
+
+        # fit PCA
+        pca = PCA(n_components=num_of_components, svd_solver='full')
+        asset_comps = pca.fit_transform(asset_days)
+
+        comp_mat = np.concatenate([
+            asset_comps[(i * self.num_of_hist_data)
+                        :((i + 1) * self.num_of_hist_data), :]
+            for i in range(self.num_of_assets)
+            ], axis=1)
+
+        pca_gauss_df = pd.DataFrame(
+            data=comp_mat, index=self.gauss_df.index,
+            columns=pd.MultiIndex.from_product([self.asset_list,
+                                                range(num_of_components)])
+            )
+
+        self.num_of_components = num_of_components
+        self.pca = pca
+        self.pca_residual = 1 - pca.explained_variance_ratio_.cumsum()[-1]
+
+        (self.pca_gauss_mean, self.pca_gauss_std,
+            self.pca_gauss_df) = standardize(pca_gauss_df)
+
+    def fit(self, asset_rho: float, pca_comp_rho: float) -> None:
+
+        if self.num_of_assets == 1:
+            pca_comp_prec = graphical_lasso(
+                self.pca_gauss_df, self.num_of_components, pca_comp_rho)
+            asset_prec = np.array([[1.0]])
+
+        elif self.num_of_horizons == 1:
+            asset_prec = graphical_lasso(
+                self.pca_gauss_df, self.num_of_assets, asset_rho)
+            pca_comp_prec = np.array([[1.0]])
+
+        else:
+            asset_prec, pca_comp_prec = gemini(
+                self.pca_gauss_df, self.num_of_assets, self.num_of_components,
+                asset_rho, pca_comp_rho
+                )
+
+        # compute covariance matrices
+        asset_cov = np.linalg.inv(asset_prec)
+        self.asset_cov = pd.DataFrame(data=(asset_cov + asset_cov.T) / 2,
+                                      index=self.asset_list,
+                                      columns=self.asset_list)
+
+        pca_comp_cov = np.linalg.inv(pca_comp_prec)
+        pca_comp_indx = ['_'.join(['lag', str(comp)])
+                        for comp in range(self.num_of_components)]
+
+        self.horizon_cov = pd.DataFrame(
+            data=(pca_comp_cov + pca_comp_cov.T) / 2,
+            index=pca_comp_indx, columns=pca_comp_indx
+            )
+
+    def fit_conditional_marginal_dist(self,
+                                      trans_timestep, hist_dict,
+                                      actmin_width: int = 5,
+                                      fcst_width_ratio: float = 0.05) -> None:
+        """Fit distribution conditional on the forecast or active minutes."""
 
         self.marginal_dict = {}
         for asset in self.asset_list:
@@ -423,60 +492,6 @@ class PCAGeminiModel(GeminiModel):
                 except:
                     raise RuntimeError(
                         f'Debugging: unable to fit ECDF for {asset} {timestep}')
-
-    def pca_transform(self, num_of_components):
-
-        self.num_of_components = num_of_components
-        self.num_of_hist_data = self.gauss_df.shape[0]
-
-        X = np.concatenate([self.gauss_df[[(asset, i) for i in range(self.num_of_horizons)]].values for asset in self.asset_list])
-
-        # Fit PCA
-        pca = PCA(n_components=num_of_components, svd_solver='full')
-        Y = pca.fit_transform(X)
-        Z = np.concatenate([Y[i*self.num_of_hist_data:(i+1)*self.num_of_hist_data, :] for i,_ in enumerate(self.asset_list)], axis=1)
-
-        pca_gauss_df = pd.DataFrame(data = Z,
-                columns=pd.MultiIndex.from_tuples([(asset, comp) for asset in self.asset_list
-                    for comp in range(self.num_of_components)]),
-                    index=self.gauss_df.index)
-
-        self.pca = pca
-        self.pca_residual = 1-pca.explained_variance_ratio_.cumsum()[-1]
-        self.pca_gauss_mean, self.pca_gauss_std, self.pca_gauss_df = standardize(pca_gauss_df)
-
-    def fit(self, asset_rho: float, pca_comp_rho: float) -> None:
-
-        if self.num_of_assets == 1:
-            pca_comp_prec = graphical_lasso(self.pca_gauss_df, self.num_of_components,
-                                           pca_comp_rho)
-            asset_prec = np.array([[1.0]])
-
-        elif self.num_of_horizons == 1:
-            asset_prec = graphical_lasso(self.pca_gauss_df, self.num_of_assets,
-                                         asset_rho)
-            pca_comp_prec = np.array([[1.0]])
-
-        else:
-            asset_prec, pca_comp_prec = gemini(
-                self.pca_gauss_df, self.num_of_assets, self.num_of_components,
-                asset_rho, pca_comp_rho
-                )
-
-        # compute covariance matrices
-        asset_cov = np.linalg.inv(asset_prec)
-        self.asset_cov = pd.DataFrame(data=(asset_cov + asset_cov.T) / 2,
-                                      index=self.asset_list,
-                                      columns=self.asset_list)
-
-        pca_comp_cov = np.linalg.inv(pca_comp_prec)
-        pca_comp_indx = ['_'.join(['lag', str(comp)])
-                        for comp in range(self.num_of_components)]
-
-        self.horizon_cov = pd.DataFrame(
-            data=(pca_comp_cov + pca_comp_cov.T) / 2,
-            index=pca_comp_indx, columns=pca_comp_indx
-            )
 
     def generate_gauss_pca_scenarios(self,
             trans_timestep,
