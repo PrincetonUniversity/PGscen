@@ -32,6 +32,10 @@ class PCAGeminiEngine(GeminiEngine):
                          forecast_resolution_in_minute, num_of_horizons,
                          forecast_lead_time_in_hour)
 
+        self.load_md = None
+        self.solar_md = None
+        self.joint_md = None
+
         ############# Compute transitional hour delay time ####################
 
         print('computing hour delay time....')
@@ -189,7 +193,7 @@ class PCAGeminiEngine(GeminiEngine):
         days = get_yearly_date_range(self.scen_start_time, end=self.end_day,
                                      num_of_days=nearest_days)
 
-        # Fit solar asset-level model
+        # fit solar asset-level model
         solar_md = PCAGeminiModel(
             self.scen_start_time, self.get_hist_df_dict(), None,
             [d + pd.Timedelta(self.time_shift, unit='H') for d in days],
@@ -197,70 +201,96 @@ class PCAGeminiEngine(GeminiEngine):
             self.forecast_lead_hours
             )
 
-        # solar_md.gauss_mean, solar_md.gauss_std, solar_md.gauss_df = standardize(solar_md.gauss_df, ignore_pointmass=True)
-        self.solar_md = solar_md
         solar_md.pca_transform(num_of_components=num_of_components)
         solar_md.fit(asset_rho, horizon_rho)
-
-        self.solar_md = solar_md
         dev_index = solar_md.hist_dev_df.index
+        self.solar_md = solar_md
 
-        # Fit load model to get deviations
-        load_md = GeminiModel(self.scen_start_time,
-                                 {'actual': load_hist_actual_df, 'forecast': load_hist_forecast_df},
-                                 None, dev_index,
-                                 self.forecast_resolution_in_minute,
-                                 self.num_of_horizons,
-                                 self.forecast_lead_hours)
-        # load_md.gauss_mean, load_md.gauss_std, load_md.gauss_df = standardize(load_md.gauss_df)
+        # fit load model to get deviations
+        load_md = GeminiModel(
+            self.scen_start_time,
+            {'actual': load_hist_actual_df, 'forecast': load_hist_forecast_df},
+            None, dev_index, self.forecast_resolution_in_minute,
+            self.num_of_horizons, self.forecast_lead_hours
+            )
+
         load_md.fit(1e-2, 1e-2)
         self.load_md = load_md
 
-        # Get Gaussian data for the joint model
+        # get Gaussian data for the joint model
 
-        # Determine zonal solar active horizons
-        west = self.meta_df.sort_values(['longitude', 'latitude'], ascending=[True, True]).iloc[0,]
-        asset, lon, lat = west._name, west['longitude'], west['latitude']
-        joint_model_start = pd.to_datetime(max([sun(LocationInfo('west', 'Texas', 'USA', lat, lon).observer,
-            date=dt)['sunrise'] for dt in dev_index])) + pd.Timedelta(60+self.trans_delay[asset]['sunrise'], unit='m')
+        # determine zonal solar active horizons
+        geosort_assets = self.meta_df.sort_values('longitude', ascending=True)
+        wst_asset, est_asset = geosort_assets.iloc[0], geosort_assets.iloc[-1]
 
-        east = self.meta_df.sort_values(['longitude', 'latitude'], ascending=[False, True]).iloc[0,]
-        asset, lon, lat = east._name, east['longitude'], east['latitude']
-        joint_model_end = pd.to_datetime(min([sun(LocationInfo('east', 'Texas', 'USA', lat, lon).observer,
-            date=dt)['sunset'] for dt in dev_index])) - pd.Timedelta(60+self.trans_delay[asset]['sunset'], unit='m')
+        joint_model_start = (
+                pd.to_datetime(max(
+                    sun(LocationInfo('west', 'Texas', 'USA',
+                                     wst_asset.latitude,
+                                     wst_asset.longitude).observer,
+                        date=dt)['sunrise'] for dt in dev_index
+                    ))
 
-        joint_model_start_hour, joint_model_end_hour = joint_model_start.floor('H').hour, joint_model_end.floor('H').hour
-        joint_model_start_timestep = [ts for ts in self.scen_timesteps if ts.hour==joint_model_start_hour][0]
-        joint_model_end_timestep = [ts for ts in self.scen_timesteps if ts.hour==joint_model_end_hour][0]
-        joint_model_horizon_start = self.scen_timesteps.index(joint_model_start_timestep)
-        joint_model_horizon_end = self.scen_timesteps.index(joint_model_end_timestep)
+                + pd.Timedelta(60
+                               + self.trans_delay[wst_asset.name]['sunrise'],
+                               unit='m')
+                ).floor('H').hour
 
-        # Zonal load
-        joint_load_df = load_md.gauss_df[[(asset, i) for asset in self.load_md.asset_list
-            for i in range(joint_model_horizon_start, joint_model_horizon_end+1)]]
+        joint_model_end = (
+                pd.to_datetime(min(
+                    sun(LocationInfo('east', 'Texas', 'USA',
+                                     est_asset.latitude,
+                                     est_asset.longitude).observer,
+                        date=dt)['sunset'] for dt in dev_index
+                    ))
 
-        # Aggreate solar to zonal-level
+                - pd.Timedelta(60
+                               + self.trans_delay[est_asset.name]['sunset'],
+                               unit='m')
+                ).floor('H').hour
+
+        joint_model_start_timestep = [ts for ts in self.scen_timesteps
+                                      if ts.hour == joint_model_start][0]
+        joint_model_end_timestep = [ts for ts in self.scen_timesteps
+                                    if ts.hour == joint_model_end][0]
+
+        joint_model_horizon_start = self.scen_timesteps.index(
+            joint_model_start_timestep)
+        joint_model_horizon_end = self.scen_timesteps.index(
+            joint_model_end_timestep)
+
+        # zonal load
+        joint_load_df = load_md.gauss_df[
+            [(asset, i) for asset in self.load_md.asset_list
+             for i in range(joint_model_horizon_start,
+                            joint_model_horizon_end + 1)]
+            ]
+
+        # aggregate solar to zonal-level
         solar_zone_gauss_df = pd.DataFrame({
-                ('_'.join(['Solar', zone]), horizon): solar_md.gauss_df[
-                    [(site, horizon) for site in sites]].sum(axis=1)
-                for zone, sites in self.meta_df.groupby('Zone').groups.items()
-                for horizon in range(joint_model_horizon_start, joint_model_horizon_end+1)
-                })
+            ('_'.join(['Solar', zone]), horizon): solar_md.gauss_df[
+                [(site, horizon) for site in sites]].sum(axis=1)
+            for zone, sites in self.meta_df.groupby('Zone').groups.items()
+            for horizon in range(joint_model_horizon_start,
+                                 joint_model_horizon_end + 1)
+            })
 
-        # Fit load and solar joint model
-        joint_md_forecast_lead_hours = self.forecast_lead_hours + \
-                int((joint_model_start_timestep - self.scen_start_time) / \
-                pd.Timedelta(self.forecast_resolution_in_minute, unit='min'))
-        joint_md = GeminiModel(self.scen_start_time,
-                                None,
-                                joint_load_df.merge(solar_zone_gauss_df, how='inner',
-                                    left_index=True, right_index=True),
-                                None,
-                                self.forecast_resolution_in_minute,
-                                joint_model_horizon_end-joint_model_horizon_start+1,
-                                joint_md_forecast_lead_hours)
+        # fit load and solar joint model
+        joint_md_forecast_lead_hours = self.forecast_lead_hours + int(
+            (joint_model_start_timestep - self.scen_start_time)
+            / pd.Timedelta(self.forecast_resolution_in_minute, unit='min')
+            )
+
+        joint_md = GeminiModel(
+            self.scen_start_time, None,
+            joint_load_df.merge(solar_zone_gauss_df, how='inner',
+                                left_index=True, right_index=True),
+            None, self.forecast_resolution_in_minute,
+            joint_model_horizon_end - joint_model_horizon_start + 1,
+            joint_md_forecast_lead_hours
+            )
+
         joint_md.fit(1e-2, 1e-2)
-
         self.joint_md = joint_md
 
     def create_load_solar_joint_scenario(self,
@@ -425,7 +455,7 @@ class PCAGeminiModel(GeminiModel):
 
         pca_comp_cov = np.linalg.inv(pca_comp_prec)
         pca_comp_indx = ['_'.join(['lag', str(comp)])
-                        for comp in range(self.num_of_components)]
+                         for comp in range(self.num_of_components)]
 
         self.horizon_cov = pd.DataFrame(
             data=(pca_comp_cov + pca_comp_cov.T) / 2,
