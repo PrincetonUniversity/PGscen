@@ -117,6 +117,8 @@ class PCAGeminiEngine(GeminiEngine):
 
         self.trans_delay = delay_dict
         self.hist_sun_info = hist_sun_dict
+        self.end_day = self.hist_forecast_df[
+            'Forecast_time'].max().strftime('%Y-%m-%d')
 
         asset_horizons = {
             asset: get_asset_transition_hour_info(
@@ -133,51 +135,68 @@ class PCAGeminiEngine(GeminiEngine):
                        for asset, horizons in asset_horizons.items()}
             }
 
-    def fit(self, num_of_components: int, asset_rho: float, horizon_rho: float,
-                nearest_days: int = 50) -> None:
+        # set time shift relative to UTC based on the state the assets are in
+        if us_state == 'Texas':
+            self.time_shift = 6
+        elif us_state == 'California':
+            self.time_shift = 8
 
-        # Need to localize historical data?
-        days = get_yearly_date_range(self.scen_start_time,
-            end=self.hist_forecast_df['Forecast_time'].max().strftime('%Y-%m-%d'),
-            num_of_days=nearest_days)
-        dev_index = [d+pd.Timedelta(6,unit='H') for d in days]
+        else:
+            raise ValueError("The only US states currently supported are "
+                             "Texas and California!")
 
-        self.model = PCAGeminiModel(self.scen_start_time, self.get_hist_df_dict(),
-                                 None, dev_index,
-                                 self.forecast_resolution_in_minute,
-                                 self.num_of_horizons,
-                                 self.forecast_lead_hours)
+        self.us_state = us_state
+
+    def fit(self,
+            asset_rho: float, horizon_rho: float,
+            num_of_components: int, nearest_days: int = 50) -> None:
+
+        # need to localize historical data?
+        days = get_yearly_date_range(self.scen_start_time, end=self.end_day,
+                                     num_of_days=nearest_days)
+
+        self.model = PCAGeminiModel(
+            self.scen_start_time, self.get_hist_df_dict(), None,
+            [d + pd.Timedelta(self.time_shift, unit='H') for d in days],
+            self.forecast_resolution_in_minute,
+            self.num_of_horizons, self.forecast_lead_hours
+            )
+
         self.model.pca_transform(num_of_components)
         self.model.fit(asset_rho, horizon_rho)
 
     def create_scenario(self,
-                        nscen: int, forecast_df: pd.DataFrame
-                        ) -> None:
+                        nscen: int, forecast_df: pd.DataFrame) -> None:
 
         self.model.get_forecast(forecast_df)
-        self.model.generate_gauss_pca_scenarios(self.trans_horizon,
-            self.hist_sun_info, nscen, upper_dict=self.meta_df.Capacity)
+        self.model.generate_gauss_pca_scenarios(
+            self.trans_horizon, self.hist_sun_info,
+            nscen, upper_dict=self.meta_df.Capacity
+            )
 
         self.scenarios[self.asset_type] = self.model.scen_df
         self.forecasts[self.asset_type] = self.get_forecast(forecast_df)
 
-    def fit_load_solar_joint_model(self, num_of_components: int, asset_rho: float,
-            horizon_rho: float, load_hist_actual_df: pd.DataFrame,
+    def fit_load_solar_joint_model(
+            self,
+            load_hist_actual_df: pd.DataFrame,
             load_hist_forecast_df: pd.DataFrame,
-            nearest_days : int = 50) -> None:
+            asset_rho: float, horizon_rho: float,
+            num_of_components: int, nearest_days : int = 50
+            ) -> None:
 
         # Need to localize historical data?
-        days = get_yearly_date_range(self.scen_start_time,
-            end=self.hist_forecast_df['Forecast_time'].max().strftime('%Y-%m-%d'),
-            num_of_days=nearest_days)
-        dev_index = [d+pd.Timedelta(6,unit='H') for d in days]
+        days = get_yearly_date_range(self.scen_start_time, end=self.end_day,
+                                     num_of_days=nearest_days)
 
         # Fit solar asset-level model
-        solar_md = PCAGeminiModel(self.scen_start_time, self.get_hist_df_dict(),
-                                 None, dev_index,
-                                 self.forecast_resolution_in_minute,
-                                 self.num_of_horizons,
-                                 self.forecast_lead_hours)
+        solar_md = PCAGeminiModel(
+            self.scen_start_time, self.get_hist_df_dict(), None,
+            [d + pd.Timedelta(self.time_shift, unit='H') for d in days],
+            self.forecast_resolution_in_minute, self.num_of_horizons,
+            self.forecast_lead_hours
+            )
+
         # solar_md.gauss_mean, solar_md.gauss_std, solar_md.gauss_df = standardize(solar_md.gauss_df, ignore_pointmass=True)
         self.solar_md = solar_md
         solar_md.pca_transform(num_of_components=num_of_components)

@@ -104,10 +104,10 @@ def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
 
         if create_load_solar:
             solar_engn.fit_load_solar_joint_model(
-                num_of_components=components,
-                asset_rho=dist / (10 * dist.max()), horizon_rho=5e-2,
                 load_hist_actual_df=load_zone_actual_hists,
-                load_hist_forecast_df=load_zone_forecast_hists
+                load_hist_forecast_df=load_zone_forecast_hists,
+                asset_rho=dist / (10 * dist.max()), horizon_rho=5e-2,
+                num_of_components=components
                 )
 
             solar_engn.create_load_solar_joint_scenario(
@@ -126,9 +126,8 @@ def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
                 out_scens['Solar'] = solar_engn.scenarios['solar'].round(4)
 
         else:
-            solar_engn.fit(num_of_components=components,
-                           asset_rho=dist / (10 * dist.max()),
-                           horizon_rho=5e-2)
+            solar_engn.fit(asset_rho=dist / (10 * dist.max()),
+                           horizon_rho=5e-2, num_of_components=components)
             solar_engn.create_scenario(scen_count, solar_site_forecast_futures)
 
             if write_csv:
