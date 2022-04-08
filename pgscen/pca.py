@@ -132,7 +132,7 @@ class PCAGeminiEngine(GeminiEngine):
             for asset, loc in asset_locs.items()
             }
 
-        self.trans_horizon = {
+        self.trans_horizons = {
             'sunrise': {asset: horizons['sunrise']
                         for asset, horizons in asset_horizons.items()},
             'sunset': {asset: horizons['sunset']
@@ -174,7 +174,7 @@ class PCAGeminiEngine(GeminiEngine):
 
         self.model.get_forecast(forecast_df)
         self.model.generate_gauss_pca_scenarios(
-            self.trans_horizon, self.hist_sun_info,
+            self.trans_horizons, self.hist_sun_info,
             nscen, upper_dict=self.meta_df.Capacity
             )
 
@@ -358,7 +358,7 @@ class PCAGeminiEngine(GeminiEngine):
         sqrtcov = sqrtm(A @ sigma @ A.T).real
         mu = C @ b
 
-        solar_md.generate_gauss_pca_scenarios(self.trans_horizon,
+        solar_md.generate_gauss_pca_scenarios(self.trans_horizons,
                 self.hist_sun_info,
                 nscen,
                 sqrtcov=sqrtcov,
@@ -397,6 +397,8 @@ class PCAGeminiModel(GeminiModel):
         self.pca_gauss_mean = None
         self.pca_gauss_std = None
         self.pca_gauss_df = None
+        self.pca_scen_gauss_df = None
+        self.marginal_ecdfs = dict()
 
     def pca_transform(self, num_of_components: int) -> None:
         """Reduce number of dimensions by applying a PCA transformation."""
@@ -463,79 +465,80 @@ class PCAGeminiModel(GeminiModel):
             )
 
     def fit_conditional_marginal_dist(self,
-                                      trans_timestep, hist_dict,
+                                      sunrise_timesteps: dict,
+                                      sunset_timesteps: dict,
+                                      hist_sun_info: dict,
                                       actmin_width: int = 5,
                                       fcst_width_ratio: float = 0.05) -> None:
         """Fit distribution conditional on the forecast or active minutes."""
 
-        self.marginal_dict = {}
         for asset in self.asset_list:
+            sunrise_hrz = sunrise_timesteps[asset]['timestep']
+            sunrise_active = sunrise_timesteps[asset]['active']
+            sunset_hrz = sunset_timesteps[asset]['timestep']
+            sunset_active = sunset_timesteps[asset]['active']
 
-            # capacity = meta_df.loc[asset].AC_capacity_MW
-
-            sunrise_hrz, sunrise_active = trans_timestep['sunrise'][asset]['timestep'], trans_timestep['sunrise'][asset]['active']
-            sunset_hrz, sunset_active = trans_timestep['sunset'][asset]['timestep'], trans_timestep['sunset'][asset]['active']
-
-            sunrise_df, sunset_df, day_df = hist_dict[asset]['sunrise'], \
-                hist_dict[asset]['sunset'], hist_dict[asset]['day']
+            sunrise_df = hist_sun_info[asset]['sunrise']
+            sunset_df = hist_sun_info[asset]['sunset']
+            day_df = hist_sun_info[asset]['day']
 
             for timestep in self.scen_timesteps:
                 fcst = self.forecasts[asset, timestep]
 
+                # sunrise horizon
                 if timestep == sunrise_hrz:
-                    # Sunrise horizon
-                    lower = max(0, sunrise_active-actmin_width)
-                    upper = min(60, sunrise_active+actmin_width)
+                    lower = max(0, sunrise_active - actmin_width)
+                    upper = min(60, sunrise_active + actmin_width)
 
-                    selected_df = sunrise_df[(sunrise_df['Active Minutes'] >= lower)
-                                            & (sunrise_df['Active Minutes']<= upper)]
+                    selected_df = sunrise_df[
+                        (sunrise_df['Active Minutes'] >= lower)
+                        & (sunrise_df['Active Minutes'] <= upper)
+                        ]
 
+                # sunset horizon
                 elif timestep == sunset_hrz:
-                    # Sunset horizon
-                    lower = max(0, sunset_active-actmin_width)
-                    upper = min(60, sunset_active+actmin_width)
+                    lower = max(0, sunset_active - actmin_width)
+                    upper = min(60, sunset_active + actmin_width)
 
-                    selected_df = sunset_df[(sunset_df['Active Minutes'] >= lower)
-                                            & (sunset_df['Active Minutes']<= upper)]
+                    selected_df = sunset_df[
+                        (sunset_df['Active Minutes'] >= lower)
+                        & (sunset_df['Active Minutes'] <= upper)
+                        ]
 
+                # daytime horizons
                 elif sunrise_hrz < timestep < sunset_hrz:
-                    # Daytime horizons
+                    fcst_min, fcst_max = day_df.Forecast.quantile([0, 1])
 
-                    fcst_min, fcst_max = day_df['Forecast'].min(), day_df['Forecast'].max()
+                    fcst_rng = fcst_max - fcst_min
+                    lower = max(fcst_min, fcst - fcst_width_ratio * fcst_rng)
+                    upper = min(fcst_max, fcst + fcst_width_ratio * fcst_rng)
 
-                    lower = max(fcst_min, fcst - fcst_width_ratio * (
-                                fcst_max - fcst_min))
-                    upper = min(fcst_max, fcst + fcst_width_ratio * (
-                                fcst_max - fcst_min))
+                    selected_df = day_df[(day_df.Forecast >= lower)
+                                         & (day_df.Forecast <= upper)]
 
-                    selected_df = day_df[(day_df['Forecast'] >= lower)
-                                            & (day_df['Forecast']
-                                                <= upper)]
+                # nighttime horizons
                 else:
-                    # Nighttime horizons
-                    selected_df = pd.DataFrame({'Deviation':np.zeros(1000)})
+                    selected_df = pd.DataFrame({'Deviation': np.zeros(1000)})
 
                 try:
-                    data = np.ascontiguousarray(selected_df['Deviation'].values)
-                    self.marginal_dict[asset, timestep] = ecdf(data)
+                    self.marginal_ecdfs[asset, timestep] = ecdf(
+                        np.ascontiguousarray(selected_df.Deviation.values))
 
                 except:
                     raise RuntimeError(
-                        f'Debugging: unable to fit ECDF for {asset} {timestep}')
+                        f'DEBUG: unable to fit ECDF for {asset} {timestep}')
 
-    def generate_gauss_pca_scenarios(self,
-            trans_timestep,
-            hist_dict,
-            nscen: int,
-            sqrtcov: Optional[np.array] = None,
-            mu: Optional[np.array] = None,
+    def generate_gauss_pca_scenarios(
+            self,
+            trans_timesteps: dict, hist_sun_info: dict, nscen: int,
+            sqrtcov: Optional[np.array] = None, mu: Optional[np.array] = None,
             lower_dict: Optional[pd.Series] = None,
             upper_dict: Optional[pd.Series] = None
             ) -> None:
 
         if sqrtcov is None:
             sqrtcov = np.kron(sqrtm(self.asset_cov.values).real,
-                                sqrtm(self.horizon_cov.values).real)
+                              sqrtm(self.horizon_cov.values).real)
 
         # generate random draws from a normal distribution and use the model
         # parameters to transform them into normalized scenario deviations
@@ -545,58 +548,46 @@ class PCAGeminiModel(GeminiModel):
         if mu is not None:
             arr += mu
 
-        pca_scen_gauss_df = pd.DataFrame(
-            data=arr.T, columns=pd.MultiIndex.from_tuples(
-                [(asset, horizon) for asset in self.asset_list
-                 for horizon in range(self.num_of_components)]
-                )
+        self.pca_scen_gauss_df = pd.DataFrame(
+            data=arr.T,
+            columns=pd.MultiIndex.from_product([self.asset_list,
+                                                range(self.num_of_components)])
+            ) * self.pca_gauss_std + self.pca_gauss_mean
+
+        asset_days = self.pca.inverse_transform(self.pca_scen_gauss_df[[
+            (asset, c) for c in range(self.num_of_components)
+            for asset in self.asset_list
+            ]].unstack().unstack(1).values)
+
+        self.scen_gauss_df = pd.DataFrame(
+            data=np.concatenate([asset_days[(i * nscen):((i + 1) * nscen), :]
+                                 for i in range(self.num_of_assets)], axis=1),
+            columns=pd.MultiIndex.from_product([self.asset_list,
+                                                range(self.num_of_horizons)])
             )
-        pca_scen_gauss_df = pca_scen_gauss_df * self.pca_gauss_std + self.pca_gauss_mean
-        self.pca_scen_gauss_df = pca_scen_gauss_df.copy()
 
-        Y = self.pca.inverse_transform(
-            np.concatenate([self.pca_scen_gauss_df[[(asset,c) for c in range(self.num_of_components)]].values
-                    for asset in self.asset_list])
-                    )
-        scen_df = pd.DataFrame(
-            data=np.concatenate([Y[i*nscen:(i+1)*nscen, :] for i in range(self.num_of_assets)], axis=1),
-            columns=pd.MultiIndex.from_tuples(
-                    [(asset, horizon) for asset in self.asset_list
-                        for horizon in range(self.num_of_horizons)]
-                    )
-                )
-
-        self.scen_gauss_df = scen_df.copy()
-
-        scen_df = scen_df * self.gauss_std + self.gauss_mean
-
-        scen_df.columns = pd.MultiIndex.from_tuples(
-            scen_df.columns).set_levels(self.scen_timesteps, level=1)
+        scen_df = self.scen_gauss_df * self.gauss_std + self.gauss_mean
+        scen_df.columns = scen_df.columns.set_levels(
+            self.scen_timesteps, level=1)
 
         # Fit conditional marginal distributions
-        self.fit_conditional_marginal_dist(trans_timestep, hist_dict)
+        self.fit_conditional_marginal_dist(trans_timesteps['sunrise'],
+                                           trans_timesteps['sunset'],
+                                           hist_sun_info)
 
         # invert the Gaussian scenario deviations by the marginal distributions
         if not self.gauss:
-
             scen_means, scen_vars = scen_df.mean(), scen_df.std()
 
             # data considered as point mass if variance < 1e-2
-            scen_means[scen_vars<1e-2] = 999999.
-            scen_vars[scen_vars<1e-2] = 1.
-
+            scen_means[scen_vars < 1e-2] = 999999.
+            scen_vars[scen_vars < 1e-2] = 1.
             u_mat = norm.cdf((scen_df - scen_means) / scen_vars)
 
-            if self.fit_conditional_marginal_dist:
-                scen_df = pd.DataFrame({
-                    col: self.marginal_dict[col].quantfun(u_mat[:, i])
-                    for i, col in enumerate(scen_df.columns)
-                    })
-            else:
-                scen_df = pd.DataFrame({
-                    col: qdist(self.gpd_dict[col], u_mat[:, i])
-                    for i, col in enumerate(scen_df.columns)
-                    })
+            scen_df = pd.DataFrame({
+                col: self.marginal_ecdfs[col].quantfun(u_mat[:, i])
+                for i, col in enumerate(scen_df.columns)
+                })
 
         # if we have loaded forecasts for the scenario time points, add the
         # unnormalized deviations to the forecasts to produce scenario values
