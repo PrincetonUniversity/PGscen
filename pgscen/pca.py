@@ -293,83 +293,81 @@ class PCAGeminiEngine(GeminiEngine):
         joint_md.fit(1e-2, 1e-2)
         self.joint_md = joint_md
 
-    def create_load_solar_joint_scenario(self,
-                                         nscen,
-                                         load_forecast_df, solar_forecast_df):
+    def create_load_solar_joint_scenario(
+            self,
+            nscen: int,
+            load_forecast_df: pd.DataFrame, solar_forecast_df: pd.DataFrame
+            ) -> None:
 
-        solar_md = self.solar_md
-        load_md = self.load_md
-        joint_md = self.joint_md
-
-        # Generate joint scenarios
-        joint_md.generate_gauss_scenarios(nscen)
-
-        horizon_shift = joint_md.forecast_lead_hours - self.forecast_lead_hours
+        # generate joint scenarios
+        self.joint_md.generate_gauss_scenarios(nscen)
+        cond_hrz_start = (self.joint_md.forecast_lead_hours
+                          - self.forecast_lead_hours)
 
         load_joint_scen_df = pd.DataFrame({
-            (zone,
-            horizon_shift + horizon): joint_md.scen_gauss_df[(zone, horizon)]
-            for zone in joint_md.asset_list
-            for horizon in range(joint_md.num_of_horizons)
+            (zone, cond_hrz_start + hz): self.joint_md.scen_gauss_df[zone, hz]
+            for zone in self.joint_md.asset_list
+            for hz in range(self.joint_md.num_of_horizons)
             if not zone.startswith('Solar_')
             })
 
-
-        solar_joint_scen_df = joint_md.scen_gauss_df[
-            [(zone, horizon) for zone in joint_md.asset_list
-            for horizon in range(joint_md.num_of_horizons)
+        solar_joint_scen_df = self.joint_md.scen_gauss_df[
+            [(zone, horizon) for zone in self.joint_md.asset_list
+            for horizon in range(self.joint_md.num_of_horizons)
             if zone.startswith('Solar_')]
             ]
 
         # generate daytime scenarios for load assets conditional on
         # the joint model
-        load_md.get_forecast(load_forecast_df)
-        load_md.fit_conditional_gpd('load',
-                                    bin_width_ratio=0.1, min_sample_size=400)
+        self.load_md.get_forecast(load_forecast_df)
+        self.load_md.fit_conditional_gpd(
+            'load', bin_width_ratio=0.1, min_sample_size=400)
 
-        cond_horizon_start = horizon_shift
-
-        cond_horizon_end = cond_horizon_start + joint_md.num_of_horizons - 1
-        sqrtcov, mu = load_md.conditional_multivar_normal_partial_time(
-            cond_horizon_start, cond_horizon_end, load_joint_scen_df)
-        load_md.generate_gauss_scenarios(nscen, sqrt_cov=sqrtcov, mu=mu)
+        cond_hrz_end = cond_hrz_start + self.joint_md.num_of_horizons
+        sqrtcov, mu = self.load_md.conditional_multivar_normal_partial_time(
+            cond_hrz_start, cond_hrz_end - 1, load_joint_scen_df)
+        self.load_md.generate_gauss_scenarios(nscen, sqrt_cov=sqrtcov, mu=mu)
 
         # generate site-level solar scenarios
-        solar_md.get_forecast(solar_forecast_df)
+        self.solar_md.get_forecast(solar_forecast_df)
 
         # (ported conditional_multivar...)
         membership = self.meta_df.groupby('Zone').groups
-        aggregates_list = [zone[6:] for zone in solar_joint_scen_df.columns.unique(0).tolist()]
-        s_mat = np.zeros((len(aggregates_list), len(solar_md.asset_list)))
+        aggregates_list = [zone[6:]
+                           for zone in solar_joint_scen_df.columns.unique(0)]
+        memb_mat = np.zeros((len(aggregates_list),
+                             len(self.solar_md.asset_list)))
 
         for aggregate, assets in membership.items():
             agg_indx = aggregates_list.index(aggregate)
 
             for asset in assets:
-                s_mat[agg_indx, solar_md.asset_list.index(asset)] = 1.
+                memb_mat[agg_indx, self.solar_md.asset_list.index(asset)] = 1.
 
-        U = np.kron(s_mat,
-                    np.eye(self.num_of_horizons)[horizon_shift:horizon_shift+joint_md.num_of_horizons, :] @
-                    solar_md.pca.components_.T) @ np.diag(solar_md.pca_gauss_std.values)
-        b = (solar_joint_scen_df.values - U @ solar_md.pca_gauss_mean).T
-        sigma = np.kron(solar_md.asset_cov, solar_md.horizon_cov)
-        C = sigma @ U.T @ np.linalg.inv(U @ sigma @ U.T)
-        A = np.eye(solar_md.num_of_components * solar_md.num_of_assets) - C @ U
-        sqrtcov = sqrtm(A @ sigma @ A.T).real
-        mu = C @ b
+        u_mat = np.kron(
+            memb_mat,
+            self.solar_md.pca.components_.T[cond_hrz_start:cond_hrz_end, :]
+            ) @ np.diag(self.solar_md.pca_gauss_std.values)
 
-        solar_md.generate_gauss_pca_scenarios(self.trans_horizons,
-                self.hist_sun_info,
-                nscen,
-                sqrtcov=sqrtcov,
-                mu=mu,
-                upper_dict=self.meta_df.Capacity
-                )
+        sigma = np.kron(self.solar_md.asset_cov, self.solar_md.horizon_cov)
+        c_mat = sigma @ u_mat.T @ np.linalg.inv(u_mat @ sigma @ u_mat.T)
+        a_mat = np.eye(self.solar_md.num_of_components
+                       * self.solar_md.num_of_assets) - c_mat @ u_mat
+
+        b_mat = (solar_joint_scen_df.values - u_mat
+                 @ self.solar_md.pca_gauss_mean).T
+        sqrtcov = sqrtm(a_mat @ sigma @ a_mat.T).real
+        mu = c_mat @ b_mat
+
+        self.solar_md.generate_gauss_pca_scenarios(
+            self.trans_horizons, self.hist_sun_info, nscen,
+            sqrtcov=sqrtcov, mu=mu, upper_dict=self.meta_df.Capacity
+            )
 
         # save the generated scenarios and the forecasted asset values for the
         # same time points
-        self.scenarios['load'] = load_md.scen_df
-        self.scenarios['solar'] = solar_md.scen_df
+        self.scenarios['load'] = self.load_md.scen_df
+        self.scenarios['solar'] = self.solar_md.scen_df
         self.forecasts['load'] = self.get_forecast(load_forecast_df)
         self.forecasts['solar'] = self.get_forecast(solar_forecast_df)
 
