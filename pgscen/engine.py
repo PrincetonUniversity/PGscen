@@ -292,44 +292,52 @@ class GeminiEngine:
         if not isinstance(actual_dfs, dict):
             actual_dfs = {self.asset_type: actual_dfs}
 
-        for asset_type, forecast in self.forecasts.items():
-            scen_date = str(self.scen_start_time.strftime('%Y%m%d'))
+        scen_date = str(self.scen_start_time.strftime('%Y%m%d'))
+        for asset_type, forecasts in self.forecasts.items():
+            out_dir = Path(save_dir, scen_date, asset_type)
 
             # create the directory where output files will be stored
-            out_dir = Path(save_dir, scen_date, asset_type)
             if not out_dir.exists():
                 os.makedirs(out_dir)
 
-            # create the output data table for each generator of this type
-            for asset in forecast.index.unique(0):
-                out_rows = list()
+            # create the first two columns of the output containing meta-data
+            scen_count = self.scenarios[asset_type].shape[0]
+            scen_types = ['Simulation'] * scen_count
+            scen_indxs = [i + 1 for i in range(scen_count)]
 
-                # add the asset actual values for the scenario time points
-                if actual_dfs[asset_type] is not None:
-                    out_rows += [
-                        pd.concat([
-                            pd.Series(['Actual', 1]),
-                            actual_dfs[asset_type].loc[self.scen_timesteps,
-                                                       asset]
-                            ])
-                        ]
+            if write_forecasts:
+                scen_types = ['Forecast'] + scen_types
+                scen_indxs = [1] + scen_indxs
+
+            if actual_dfs[asset_type] is not None:
+                scen_types = ['Actual'] + scen_types
+                scen_indxs = [1] + scen_indxs
+
+            # create the output data table for each generator of this type
+            out_index = pd.DataFrame({'Type': scen_types, 'Index': scen_indxs})
+            for asset in forecasts.index.unique(0):
+                out_vals = self.scenarios[
+                    asset_type][asset][self.scen_timesteps].T
 
                 # add the asset forecast values for the scenario time points
                 if write_forecasts:
-                    out_rows += [pd.concat([pd.Series(['Forecast', 1]),
-                                            forecast[asset]])]
+                    out_vals = pd.concat([
+                        forecasts[asset][self.scen_timesteps], out_vals],
+                        ignore_index=True, axis=1
+                        )
 
-                # add the asset scenario values
-                for i, (_, scens) in enumerate(
-                        self.scenarios[asset_type][asset].iterrows()):
-                    out_rows += [pd.concat([pd.Series(['Simulation', i + 1]),
-                                            scens])]
+                # add the asset actual values for the scenario time points
+                if actual_dfs[asset_type] is not None:
+                    out_vals = pd.concat([
+                        actual_dfs[asset_type].loc[self.scen_timesteps, asset],
+                        out_vals
+                        ], ignore_index=True, axis=1)
 
-                # get formatted labels for the scenario time points
-                out_table = pd.concat(out_rows, axis=1).transpose()
-                out_table.columns = ['Type', 'Index'] + [
-                    ts.strftime('%H%M') for ts in self.scen_timesteps]
-                out_table['Index'] = out_table.Index.astype(int)
+                # concatenate the scenario value columns and the meta-data
+                # columns to get the final output table
+                out_vals.columns = out_index.index
+                out_vals.index = [ts.strftime('%H%M') for ts in out_vals.index]
+                out_table = pd.concat([out_index, out_vals.T], axis=1)
 
                 # TODO: round values for more compact storage
                 # save output table to file

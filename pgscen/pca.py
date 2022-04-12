@@ -401,10 +401,10 @@ class PCAGeminiModel(GeminiModel):
     def pca_transform(self, num_of_components: int) -> None:
         """Reduce number of dimensions by applying a PCA transformation."""
 
-        asset_days = self.gauss_df[[(asset, i)
-                                    for i in range(self.num_of_horizons)
-                                    for asset in self.asset_list]]
-        asset_days = asset_days.unstack().unstack('Time').values
+        asset_days = self.gauss_df[[
+            (asset, i) for i in range(self.num_of_horizons)
+            for asset in self.asset_list
+            ]].unstack().unstack('Time').values
 
         # fit PCA
         pca = PCA(n_components=num_of_components, svd_solver='full')
@@ -537,6 +537,8 @@ class PCAGeminiModel(GeminiModel):
         if sqrtcov is None:
             sqrtcov = np.kron(sqrtm(self.asset_cov.values).real,
                               sqrtm(self.horizon_cov.values).real)
+
+        np.random.seed(7701)
 
         # generate random draws from a normal distribution and use the model
         # parameters to transform them into normalized scenario deviations
