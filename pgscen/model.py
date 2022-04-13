@@ -44,7 +44,7 @@ class GeminiError(Exception):
     pass
 
 
-class GeminiModel(object):
+class GeminiModel:
     """
     A class for fitting GEMINI models to asset actual and forecast values and
     using them to generate scenarios for a given time frame.
@@ -255,14 +255,15 @@ class GeminiModel(object):
                 }
 
             # standardize gaussians
-            self.gauss_mean, self.gauss_std, self.gauss_df = standardize(gauss_df)
-
+            self.gauss_mean, self.gauss_std, self.gauss_df = standardize(
+                gauss_df)
             self.num_of_assets = len(self.asset_list)
-            
+
         # if normalized historical deviations are given, just use those
         elif gauss_df is not None:
             self.gauss = True
-            self.asset_list = gauss_df.columns.get_level_values(0)[::self.num_of_horizons]
+            self.asset_list = gauss_df.columns.get_level_values(0)[
+                                ::self.num_of_horizons]
             self.gauss_df = gauss_df
             self.num_of_assets = len(self.asset_list)
 

@@ -11,7 +11,7 @@ from typing import List, Dict, Tuple, Iterable, Optional
 
 from .model import GeminiModel
 from .engine import GeminiEngine
-from .utils.r_utils import qdist, graphical_lasso, gemini, ecdf, standardize
+from .utils.r_utils import graphical_lasso, gemini, PGscenECDF, standardize
 from .utils.solar_utils import (get_yearly_date_range,
                                 get_asset_transition_hour_info)
 
@@ -42,6 +42,7 @@ class PCAGeminiEngine(GeminiEngine):
 
         hist_dates = solar_hist_forecast_df.groupby(
             'Issue_time').head(1).Forecast_time.dt.date.tolist()
+        fcst_df = solar_hist_forecast_df.set_index('Forecast_time')
 
         delay_dict = dict()
         hist_sun_dict = dict()
@@ -54,9 +55,8 @@ class PCAGeminiEngine(GeminiEngine):
             for asset, asset_data in self.meta_df.iterrows()
             }
 
-        for asset, actl_vals in solar_hist_actual_df.iteritems():
-            fcst_vals = solar_hist_forecast_df.set_index(
-                'Forecast_time')[asset]
+        for asset, actl_vals in solar_hist_actual_df.sort_index().iteritems():
+            fcst_vals = fcst_df[asset]
 
             sunrise_data, sunset_data = list(), list()
             day_data = {'Time': list(), 'Actual': list(),
@@ -87,15 +87,17 @@ class PCAGeminiEngine(GeminiEngine):
                                     trans_info['sunset']['active']])
 
                 # daytime
-                day_actls = actl_vals[
-                    (actl_vals.index > trans_info['sunrise']['timestep'])
-                    & (actl_vals.index < trans_info['sunset']['timestep'])
-                    ].sort_index()
+                actl_rise_indx = actl_vals.index.get_loc(
+                    trans_info['sunrise']['timestep']) + 1
+                actl_set_indx = actl_vals.index.get_loc(
+                    trans_info['sunset']['timestep'])
+                day_actls = actl_vals.iloc[actl_rise_indx:actl_set_indx]
 
-                day_fcsts = fcst_vals[
-                    (fcst_vals.index > trans_info['sunrise']['timestep'])
-                    & (fcst_vals.index < trans_info['sunset']['timestep'])
-                    ].sort_index()
+                fcst_rise_indx = fcst_vals.index.get_loc(
+                    trans_info['sunrise']['timestep']) + 1
+                fcst_set_indx = fcst_vals.index.get_loc(
+                    trans_info['sunset']['timestep'])
+                day_fcsts = fcst_vals[fcst_rise_indx:fcst_set_indx]
 
                 day_data['Time'] += day_actls.index.tolist()
                 day_data['Actual'] += day_actls.values.tolist()
@@ -519,7 +521,7 @@ class PCAGeminiModel(GeminiModel):
                     selected_df = pd.DataFrame({'Deviation': np.zeros(1000)})
 
                 try:
-                    self.marginal_ecdfs[asset, timestep] = ecdf(
+                    self.marginal_ecdfs[asset, timestep] = PGscenECDF(
                         np.ascontiguousarray(selected_df.Deviation.values))
 
                 except:
