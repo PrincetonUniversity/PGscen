@@ -24,19 +24,23 @@ splines = importr('splines')
 stats = importr('stats')
 
 
-class ecdf(object):
+class PGscenECDF:
     """
-    class object to store emperical CDF (ECDF) 
+    class object to store emperical CDF (ECDF)
     """
 
-    def __init__(self, data, n=1000):
+    def __init__(self, data: np.array, n: int = 1000) -> None:
         self.rclass = ['ecdf']
         self.data = data
         self.ecdf = stats.ecdf(robjects.FloatVector(data))
 
-        # Linear interpolation of quantile function
-        xx = robjects.FloatVector(np.linspace(0,1,n+1))
-        self.quantfun = stats.approxfun(xx, stats.quantile(self.ecdf, xx))
+        quants = robjects.FloatVector(np.linspace(0, 1, n + 1))
+        self.approxfun = stats.approxfun(quants,
+                                         stats.quantile(self.ecdf, quants))
+
+    def quantfun(self, data: np.array) -> np.array:
+        return self.approxfun(data)
+
 
 def point_mass(data: np.array, masspt: float, threshold: float = 0.05) -> bool:
     """
@@ -127,7 +131,7 @@ def gpd_tail(data: np.array, lower: float = 0.15, upper: float = 0.85,
         upper_df = pd.DataFrame({'upper': sdata[nup:]})
         upper_counts = upper_df.groupby(pd.cut(
             upper_df['upper'], bins)).count().sort_index().values.ravel()
-        
+
         uu = True
         for i in range(len(upper_counts) - 1):
             if upper_counts[i + 1] > upper_counts[i] + bin_threshold:
@@ -146,9 +150,9 @@ def gpd_tail(data: np.array, lower: float = 0.15, upper: float = 0.85,
 
 def pgpd(dist: GPD, x: np.array) -> np.array:
     """Wrapper for pgpd function in Rsafd; computes CDF at all values in x."""
-
     f = Rsafd.pgpd
-    return np.array(f(dist,robjects.FloatVector(x)))
+
+    return np.array(f(dist, robjects.FloatVector(x)))
 
 
 def qgpd(dist: GPD, x: np.array) -> np.array:
@@ -167,9 +171,9 @@ def qgpd(dist: GPD, x: np.array) -> np.array:
         ff = stats.approxfun(Rsafd.pgpd(dist, xx), xx, rule=2)
 
         return ff(x)
-    
 
-def fit_dist(data: np.array) -> Union[GPD, ecdf]:
+
+def fit_dist(data: np.array) -> Union[GPD, ECDF]:
     """Fit a distribution (GPD or the emperical distribution) function."""
 
     # perturb the data if it has a point mass at zero
@@ -190,18 +194,18 @@ def fit_dist(data: np.array) -> Union[GPD, ecdf]:
                           f'GPD, using ECDF instead', RuntimeWarning)
 
             # return stats.ecdf(robjects.FloatVector(data))
-            return ecdf(data)
+            return ECDF(data)
 
     else:
         # return stats.ecdf(robjects.FloatVector(data))
-        return ecdf(data)
+        return ECDF(data)
 
 
-def pdist(dist: Union[GPD, ecdf], x: np.array) -> np.array:
+def pdist(dist: Union[GPD, PGscenECDF], x: np.array) -> np.array:
     """Evaluate a CDF function."""
 
     if tuple(dist.rclass)[0][0:3] == 'gpd':
-        return np.array(Rsafd.pgpd(dist,robjects.FloatVector(x)))
+        return np.array(Rsafd.pgpd(dist, robjects.FloatVector(x)))
 
     elif tuple(dist.rclass)[0] == 'ecdf':
         return np.array(dist.ecdf(robjects.FloatVector(x)))
@@ -209,37 +213,44 @@ def pdist(dist: Union[GPD, ecdf], x: np.array) -> np.array:
     else:
         raise(RuntimeError('Unrecognized distribution class {}'.format(
             tuple(dist.rclass))))
-    
 
-def qdist(dist: Union[GPD, ecdf], x: np.array) -> np.array:
+
+def qdist(dist: Union[GPD, PGscenECDF], x: np.array) -> np.array:
     """Compute the quantiles of the distribution."""
 
-    if tuple(dist.rclass)[0][0:3]=='gpd':
+    if tuple(dist.rclass)[0][0:3] == 'gpd':
         # GPD
-        return qgpd(dist,x)
+        return qgpd(dist, x)
 
     elif tuple(dist.rclass)[0] == 'ecdf':
         # Empirical CDF
-        return stats.quantile(dist.ecdf,robjects.FloatVector(x))
+        return stats.quantile(dist.ecdf, robjects.FloatVector(x))
 
     else:
-        raise(RuntimeError('Unrecognized distribution class {}'.format(
-            tuple(dist.rclass))))
-    
-def standardize(df, ignore_pointmass=True):
-    m, s = df.mean(), df.std()
+        raise RuntimeError(
+            "Unrecognized distribution class {}".format(tuple(dist.rclass)))
+
+
+def standardize(table: pd.DataFrame,
+                ignore_pointmass: bool = True) -> Tuple[pd.Series, pd.Series,
+                                                        pd.DataFrame]:
+    avg, std = table.mean(), table.std()
+
     if ignore_pointmass:
-        s[s<1e-2] = 1.
+        std[std < 1e-2] = 1.
+
     else:
-        if (s < 1e-2).any():
-            raise(RuntimeError(f'encount point masses in columns {s[s<1e-2].index.tolist()}'))
-    return m, s, (df - m) / s
+        if (std < 1e-2).any():
+            raise RuntimeError(f'encountered point masses in '
+                               f'columns {std[std < 1e-2].index.tolist()}')
+
+    return avg, std, (table - avg) / std
 
 
 def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
     """Transform the data to fit a Gaussian distribution."""
 
-    unif_df = pd.DataFrame(columns=df.columns,index=df.index)
+    unif_df = pd.DataFrame(columns=df.columns, index=df.index)
     dist_dict = dict()
 
     for col in df.columns:
@@ -248,30 +259,14 @@ def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
         # dist_dict[col] = stats.ecdf(data)
         # unif_df[col] = np.array(dist_dict[col](robjects.FloatVector(data)))
 
-        dist_dict[col] = ecdf(data)
-        unif_df[col] = np.array(dist_dict[col].ecdf(robjects.FloatVector(data)))
+        dist_dict[col] = PGscenECDF(data)
+        unif_df[col] = np.array(
+            dist_dict[col].ecdf(robjects.FloatVector(data)))
 
     unif_df.clip(lower=1e-5, upper=0.99999, inplace=True)
     gauss_df = unif_df.apply(norm.ppf)
 
     return dist_dict, gauss_df
-
-# def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
-#     """Transform the data to fit a Gaussian distribution."""
-
-#     unif_df = pd.DataFrame(columns=df.columns,index=df.index)
-#     dist_dict = dict()
-
-#     for col in df.columns:
-#         data = np.ascontiguousarray(df[col].values)
-
-#         dist_dict[col] = fit_dist(data)
-#         unif_df[col] = np.array(pdist(dist_dict[col],data))
-
-#     unif_df.clip(lower=1e-5, upper=0.99999, inplace=True)
-#     gauss_df = unif_df.apply(norm.ppf)
-
-#     return dist_dict, gauss_df
 
 
 def graphical_lasso(df: pd.DataFrame, m: int, rho: float):
@@ -292,14 +287,11 @@ def graphical_lasso(df: pd.DataFrame, m: int, rho: float):
         "Expected a DataFrame with {} columns, got {}".format(m, df.shape[1]))
 
     f = glasso.glasso
-    COV = df.cov().values
-    RCOV = robjects.r.matrix(COV, nrow=m, ncol=m)
+    cov = df.cov().values
+    rcov = robjects.r.matrix(cov, nrow=m, ncol=m)
+    res = f(rcov, rho=rho, penalize_diagonal=False)
 
-    RES = f(RCOV, rho=rho, penalize_diagonal=False)
-    RES_DICT = dict(zip(RES.names, list(RES)))
-    INVCOV = RES_DICT['wi']
-
-    return INVCOV
+    return dict(zip(res.names, list(res)))['wi']
 
 
 def gemini(df: pd.DataFrame,
@@ -323,10 +315,10 @@ def gemini(df: pd.DataFrame,
 
     """
     assert df.shape[1] == m * f, (
-        "Expected a DataFrame with {} columns, got {}".format(f * m,
-                                                              df.shape[1])
+        "Expected a DataFrame with {} columns, found {} "
+        "columns instead!".format(f * m, df.shape[1])
         )
-        
+
     n = len(df)
     XTX = np.zeros((m, m))
     XXT = np.zeros((f, f))
@@ -340,7 +332,7 @@ def gemini(df: pd.DataFrame,
     WB = np.diag(XXT)
     GA = XTX / np.sqrt(np.outer(WA, WA))
     GB = XXT / np.sqrt(np.outer(WB, WB))
-    
+
     GAr = robjects.r.matrix(GA, nrow=m, ncol=m)
     GBr = robjects.r.matrix(GB, nrow=f, ncol=f)
     rA = glasso.glasso(GAr, rho=pA, penalize_diagonal=False)
@@ -368,11 +360,13 @@ def get_ecdf_data(cdf: ECDF) -> np.array:
 
 envstats = importr('EnvStats')
 
+
 def ebeta(data):
     beta = envstats.ebeta(robjects.FloatVector(data))
     d = dict(zip(beta.names, list(beta)))
     a,b = d['parameters'][0], d['parameters'][1]
     return a, b
+
 
 def dbeta(p, a, b):
     return np.array(stats.dbeta(robjects.FloatVector(p), a, b))
