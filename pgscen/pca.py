@@ -7,7 +7,7 @@ from scipy.stats import norm
 from sklearn.decomposition import PCA
 from astral import LocationInfo
 from astral.sun import sun
-from typing import List, Dict, Tuple, Iterable, Optional
+from typing import List, Dict, Tuple, Iterable, Optional, Union
 
 from .model import GeminiModel
 from .engine import GeminiEngine
@@ -155,7 +155,8 @@ class PCAGeminiEngine(GeminiEngine):
 
     def fit(self,
             asset_rho: float, horizon_rho: float,
-            num_of_components: int, nearest_days: int = 50) -> None:
+            num_of_components: Union[int, float] = 0.99, 
+            nearest_days: int = 50) -> None:
 
         # need to localize historical data?
         days = get_yearly_date_range(self.scen_start_time, end=self.end_day,
@@ -188,7 +189,8 @@ class PCAGeminiEngine(GeminiEngine):
             load_hist_actual_df: pd.DataFrame,
             load_hist_forecast_df: pd.DataFrame,
             asset_rho: float, horizon_rho: float,
-            num_of_components: int, nearest_days : int = 50
+            num_of_components: Union[int, float] = 0.99, 
+            nearest_days : int = 50
             ) -> None:
 
         # Need to localize historical data?
@@ -267,6 +269,11 @@ class PCAGeminiEngine(GeminiEngine):
              for i in range(joint_model_horizon_start,
                             joint_model_horizon_end + 1)]
             ]
+        
+        # shift joint load horizons to be started from 0
+        joint_load_df.rename(columns={horizon : horizon - joint_model_horizon_start 
+            for horizon in range(joint_model_horizon_start,
+                                 joint_model_horizon_end + 1)}, level=1, inplace=True)
 
         # aggregate solar to zonal-level
         solar_zone_gauss_df = pd.DataFrame({
@@ -276,6 +283,14 @@ class PCAGeminiEngine(GeminiEngine):
             for horizon in range(joint_model_horizon_start,
                                  joint_model_horizon_end + 1)
             })
+
+        # shift joint solar horizons to be started from 0
+        solar_zone_gauss_df.rename(columns={horizon : horizon - joint_model_horizon_start 
+            for horizon in range(joint_model_horizon_start,
+                                 joint_model_horizon_end + 1)}, level=1, inplace=True)
+
+        # standardize zone-level solar
+        solar_zone_gauss_mean, solar_zone_gauss_std, solar_zone_gauss_df = standardize(solar_zone_gauss_df)
 
         # fit load and solar joint model
         joint_md_forecast_lead_hours = self.forecast_lead_hours + int(
@@ -291,6 +306,9 @@ class PCAGeminiEngine(GeminiEngine):
             joint_model_horizon_end - joint_model_horizon_start + 1,
             joint_md_forecast_lead_hours
             )
+
+        joint_md.solar_gauss_mean = solar_zone_gauss_mean
+        joint_md.solar_gauss_std = solar_zone_gauss_std
 
         joint_md.fit(1e-2, 1e-2)
         self.joint_md = joint_md
@@ -312,12 +330,18 @@ class PCAGeminiEngine(GeminiEngine):
             for hz in range(self.joint_md.num_of_horizons)
             if not zone.startswith('Solar_')
             })
+        self.joint_md.load_scen_gauss_df = load_joint_scen_df.copy()
 
         solar_joint_scen_df = self.joint_md.scen_gauss_df[
             [(zone, horizon) for zone in self.joint_md.asset_list
             for horizon in range(self.joint_md.num_of_horizons)
             if zone.startswith('Solar_')]
             ]
+        self.joint_md.solar_scen_unbias_gauss_df = solar_joint_scen_df.copy()
+
+        # Add back mean and std        
+        solar_joint_scen_df = solar_joint_scen_df * self.joint_md.solar_gauss_std + \
+            self.joint_md.solar_gauss_mean
 
         # generate daytime scenarios for load assets conditional on
         # the joint model
@@ -400,7 +424,7 @@ class PCAGeminiModel(GeminiModel):
         self.pca_scen_gauss_df = None
         self.marginal_ecdfs = dict()
 
-    def pca_transform(self, num_of_components: int) -> None:
+    def pca_transform(self, num_of_components: Union[int, float]=0.99) -> None:
         """Reduce number of dimensions by applying a PCA transformation."""
 
         asset_days = self.gauss_df[[
@@ -411,6 +435,7 @@ class PCAGeminiModel(GeminiModel):
         # fit PCA
         pca = PCA(n_components=num_of_components, svd_solver='full')
         asset_comps = pca.fit_transform(asset_days)
+        num_of_components = pca.n_components_
 
         comp_mat = np.concatenate([
             asset_comps[(i * self.num_of_hist_data)
@@ -550,11 +575,15 @@ class PCAGeminiModel(GeminiModel):
         if mu is not None:
             arr += mu
 
-        self.pca_scen_gauss_df = pd.DataFrame(
+        pca_scen_gauss_df = pd.DataFrame(
             data=arr.T,
             columns=pd.MultiIndex.from_product([self.asset_list,
                                                 range(self.num_of_components)])
-            ) * self.pca_gauss_std + self.pca_gauss_mean
+            ) 
+        self.pca_scen_gauss_unbias_df = pca_scen_gauss_df.copy()
+        
+        # Add back mean and std
+        self.pca_scen_gauss_df = pca_scen_gauss_df * self.pca_gauss_std + self.pca_gauss_mean
 
         asset_days = self.pca.inverse_transform(self.pca_scen_gauss_df[[
             (asset, c) for c in range(self.num_of_components)
