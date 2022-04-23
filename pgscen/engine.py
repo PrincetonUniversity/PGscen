@@ -12,7 +12,7 @@ from astral.sun import sun
 from typing import List, Dict, Set, Iterable, Optional, Union
 
 from .model import get_asset_list, GeminiModel, GeminiError
-from .utils.solar_utils import overlap, get_yearly_date_range
+from .utils.solar_utils import overlap
 
 
 class GeminiEngine:
@@ -62,6 +62,13 @@ class GeminiEngine:
         scenarios : Optional[Dict[pd.DataFrame]]
             The scenarios generated using this engine.
 
+        time_shift: int
+            How many hours these assets' location time zone differs from UTC.
+        us_state: str
+            Which US state the assets are located in. The values supported
+            currently are "Texas" for the default ERCOT/NREL datasets and
+            "California" for RTS-GMLC.
+
     """
 
     def __init__(self,
@@ -71,7 +78,8 @@ class GeminiEngine:
                  asset_type: Optional[str] = None,
                  forecast_resolution_in_minute: int = 60,
                  num_of_horizons: int = 24,
-                 forecast_lead_time_in_hour: int = 12) -> None:
+                 forecast_lead_time_in_hour: int = 12,
+                 us_state: str = 'Texas') -> None:
 
         # check that the dataframes with actual and forecast values are in the
         # right format, get the names of the assets they contain values for
@@ -81,6 +89,9 @@ class GeminiEngine:
         self.hist_actual_df = hist_actual_df
         self.hist_forecast_df = hist_forecast_df
         self.scen_start_time = scen_start_time
+        self.hist_start = self.hist_forecast_df.Forecast_time.min().floor('D')
+        self.hist_end = self.hist_forecast_df.Forecast_time.max().floor('D')
+
         self.meta_df = meta_df
         self.asset_type = asset_type
         self.model = None
@@ -139,7 +150,21 @@ class GeminiEngine:
         self.forecasts = dict()
         self.scenarios = dict()
 
-    def fit(self, asset_rho: float, horizon_rho: float) -> None:
+        # set time shift relative to UTC based on the state the assets are in
+        if us_state == 'Texas':
+            self.time_shift = 6
+        elif us_state == 'California':
+            self.time_shift = 8
+
+        else:
+            raise ValueError("The only US states currently supported are "
+                             "Texas and California!")
+
+        self.us_state = us_state
+
+    def fit(self,
+            asset_rho: float, horizon_rho: float,
+            nearest_days: Optional[int] = None) -> None:
         """
         This function creates and fits a scenario model using historical asset
         values. The model will estimate the distributions of the deviations
@@ -153,8 +178,18 @@ class GeminiEngine:
                 Regularization hyper-parameter governing time point precisions.
 
         """
+
+        if nearest_days:
+            days = self.get_yearly_date_range(use_date=self.scen_start_time,
+                                              num_of_days=nearest_days)
+            dev_index = [d + pd.Timedelta(self.time_shift, unit='H')
+                         for d in days]
+
+        else:
+            dev_index = None
+
         self.model = GeminiModel(self.scen_start_time, self.get_hist_df_dict(),
-                                 None, None,
+                                 None, dev_index,
                                  self.forecast_resolution_in_minute,
                                  self.num_of_horizons,
                                  self.forecast_lead_hours)
@@ -261,6 +296,28 @@ class GeminiEngine:
 
         return use_forecasts.unstack()
 
+    def get_yearly_date_range(self,
+                              use_date: pd.Timestamp,
+                              num_of_days: int = 60) -> Set[pd.Timestamp]:
+        """Get date range around a specific date."""
+
+        hist_dates = pd.date_range(start=self.hist_start, end=self.hist_end,
+                                   freq='D', tz='utc')
+        hist_years = hist_dates.year.unique()
+        hist_dates = set(hist_dates)
+
+        # take given number of days before and after
+        near_dates = set()
+        for year in hist_years:
+            year_date = datetime(year, use_date.month, use_date.day)
+
+            near_dates = near_dates.union(set(pd.date_range(
+                start=year_date - pd.Timedelta(num_of_days, unit='D'),
+                periods=2 * num_of_days + 1, freq='D', tz='utc')
+                ))
+
+        return hist_dates.intersection(near_dates)
+
     def write_to_csv(self,
                      save_dir: Union[str, Path],
                      actual_dfs: Union[pd.DataFrame, Dict[str, pd.DataFrame]],
@@ -296,11 +353,9 @@ class GeminiEngine:
         for asset_type, forecasts in self.forecasts.items():
             out_dir = Path(save_dir, scen_date, asset_type)
 
-            # create the directory where output files will be stored
-            if not out_dir.exists():
-                os.makedirs(out_dir)
-
-            # create the first two columns of the output containing meta-data
+            # create the directory where output files will be stored, as well
+            # as the first two columns of the output containing meta-data
+            os.makedirs(out_dir, exist_ok=True)
             scen_count = self.scenarios[asset_type].shape[0]
             scen_types = ['Simulation'] * scen_count
             scen_indxs = [i + 1 for i in range(scen_count)]
@@ -365,12 +420,6 @@ class SolarGeminiEngine(GeminiEngine):
             The number of conditional dusk/dawn models.
         asset_distance_mat: pd.DataFrame
             The distances between the locations of each pair of assets.
-        time_shift: int
-            How many hours these assets' location time zone differs from UTC.
-        us_state: str
-            Which US state the assets are located in. The values supported
-            currently are "Texas" for the default ERCOT/NREL datasets and
-            "California" for RTS-GMLC.
 
     """
 
@@ -386,7 +435,7 @@ class SolarGeminiEngine(GeminiEngine):
         super().__init__(solar_hist_actual_df, solar_hist_forecast_df,
                          scen_start_time, solar_meta_df, 'solar',
                          forecast_resolution_in_minute, num_of_horizons,
-                         forecast_lead_time_in_hour)
+                         forecast_lead_time_in_hour, us_state)
 
         self.asset_locs = {site: Observer(lat, lon)
                            for site, lat, lon in zip(solar_meta_df.site_ids,
@@ -502,21 +551,7 @@ class SolarGeminiEngine(GeminiEngine):
         self.cond_count = cond_indx
         self.asset_distance_mat = self.asset_distance()
 
-        # set time shift relative to UTC based on the state the assets are in
-        if us_state == 'Texas':
-            self.time_shift = 6
-        elif us_state == 'California':
-            self.time_shift = 8
-
-        else:
-            raise ValueError("The only US states currently supported are "
-                             "Texas and California!")
-
-        self.us_state = us_state
-
-    def fit_solar_model(self,
-                        hist_start: str = '2017-01-01',
-                        hist_end: str = '2018-12-31') -> None:
+    def fit_solar_model(self) -> None:
         """Fit each of the solar scenario models in the engine."""
 
         # for each solar model, starting with the daytime model, find the
@@ -532,7 +567,7 @@ class SolarGeminiEngine(GeminiEngine):
 
             hist_dates = self.get_solar_hist_dates(
                 self.scen_start_time.floor('D'), asset_list,
-                hist_start, hist_end, time_range_in_minutes=minute_range
+                time_range_in_minutes=minute_range
                 )
 
             # shift hours in the historical date due to utc and local time zone
@@ -563,8 +598,6 @@ class SolarGeminiEngine(GeminiEngine):
     def fit_load_solar_joint_model(self,
                                    load_hist_actual_df: pd.DataFrame,
                                    load_hist_forecast_df: pd.DataFrame,
-                                   hist_start: str = '2017-01-01',
-                                   hist_end: str = '2018-12-31',
                                    load_zonal: bool = True) -> None:
         """
         This function fits a joint load/solar model for each time of day. The
@@ -582,7 +615,7 @@ class SolarGeminiEngine(GeminiEngine):
         # times to the scenario date
         day_hist_dates = self.get_solar_hist_dates(
             self.scen_start_time.floor('D'), self.asset_list,
-            hist_start, hist_end, time_range_in_minutes=30
+            time_range_in_minutes=30
             )
 
         # shift solar historical dates by the hour of scenario start time due
@@ -603,8 +636,8 @@ class SolarGeminiEngine(GeminiEngine):
         # shift load historical dates by the hour of scenario start time due to
         # utc and local time zone
         load_hour = self.scen_start_time.hour
-        load_hist_dates = get_yearly_date_range(
-            self.scen_start_time.floor('D'), 60, hist_start, hist_end)
+        load_hist_dates = self.get_yearly_date_range(
+            use_date=self.scen_start_time.floor('D'), num_of_days=60)
 
         if load_hour >= self.time_shift:
             self.gemini_dict['day']['load_hist_deviation_index'] = [
@@ -706,7 +739,7 @@ class SolarGeminiEngine(GeminiEngine):
             # times to the scenario date
             solar_hist_dates = self.get_solar_hist_dates(
                 self.scen_start_time.floor('D'), asset_list,
-                hist_start, hist_end, time_range_in_minutes=10
+                time_range_in_minutes=10
                 )
 
             # shift hours in the historical date due to utc and local time zone
@@ -961,8 +994,8 @@ class SolarGeminiEngine(GeminiEngine):
 
     def get_solar_hist_dates(
             self,
-            date: pd.Timestamp, assets: Iterable[str],
-            hist_start: str, hist_end: str, time_range_in_minutes: int = 15
+            use_date: pd.Timestamp, assets: Iterable[str],
+            time_range_in_minutes: int = 15,
             ) -> Set[pd.Timestamp]:
         """
         This function is a utility for finding historical dates which have
@@ -970,22 +1003,19 @@ class SolarGeminiEngine(GeminiEngine):
 
         Arguments
         ---------
-            date
+            use_date
                 The date we are comparing historical dates to.
             assets
                 The engine assets at whose location we want to compare sunrise
                 and sunset times.
 
-            hist_start, hist_end
-                The interval of historical dates we will search over.
             time_range_in_minutes
                 Maximum difference in sunset and sunrise times for a historical
                 date to be considered as similar.
 
         """
-        hist_dates = get_yearly_date_range(date, start=hist_start,
-                                           end=hist_end)
-        asset_suns = {asset: sun(self.asset_locs[asset], date=date)
+        hist_dates = self.get_yearly_date_range(use_date)
+        asset_suns = {asset: sun(self.asset_locs[asset], date=use_date)
                       for asset in assets}
 
         for site in asset_suns:
