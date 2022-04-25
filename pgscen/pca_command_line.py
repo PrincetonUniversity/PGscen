@@ -1,11 +1,13 @@
 """Interface for generating scenarios using PCA models on Texas-7k datasets."""
 
 import argparse
-import pandas as pd
 from pathlib import Path
 import bz2
 import dill as pickle
 import time
+
+import numpy as np
+import pandas as pd
 
 from .command_line import parent_parser
 from .utils.data_utils import (load_solar_data, load_load_data,
@@ -15,8 +17,11 @@ from .pca import PCAGeminiEngine
 
 
 pca_parser = argparse.ArgumentParser(add_help=False, parents=[parent_parser])
-pca_parser.add_argument('--components', '-c', type=int, default=12,
-                        help="how many factors to use when fitting the PCA")
+pca_parser.add_argument(
+    '--components', '-c', type=str, default='0.99',
+    help="How many factors to use when fitting the PCA."
+         "See sklearn.decomposition.PCA for possible argument values."
+    )
 
 
 def run_solar():
@@ -26,9 +31,9 @@ def run_solar():
         ).parse_args()
 
     t7k_pca_runner(args.start, args.days, args.out_dir, args.scenario_count,
-                   args.components, create_load_solar=False,
-                   write_csv=not args.pickle, skip_existing=args.skip_existing,
-                   verbosity=args.verbose)
+                   args.components, args.nearest_days, args.random_seed,
+                   create_load_solar=False, write_csv=not args.pickle,
+                   skip_existing=args.skip_existing, verbosity=args.verbose)
 
 
 def run_load_solar():
@@ -39,15 +44,34 @@ def run_load_solar():
         ).parse_args()
 
     t7k_pca_runner(args.start, args.days, args.out_dir, args.scenario_count,
-                   args.components, create_load_solar=True,
-                   write_csv=not args.pickle, skip_existing=args.skip_existing,
-                   verbosity=args.verbose)
+                   args.components, args.nearest_days, args.random_seed,
+                   create_load_solar=True, write_csv=not args.pickle,
+                   skip_existing=args.skip_existing, verbosity=args.verbose)
 
 
 def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
-                   create_load_solar=False,
+                   nearest_days, random_seed, create_load_solar=False,
                    write_csv=True, skip_existing=False, verbosity=0):
     start = ' '.join([start_date, "06:00:00"])
+
+    if random_seed:
+        np.random.seed(random_seed)
+
+    if components.isdigit() and components != '0':
+        components = int(components)
+
+    elif components[:2] == '0.' and components[2:].isdigit():
+        components = float(components)
+    elif components[0] == '.' and components[1:].isdigit():
+        components = float(components)
+
+    elif components != 'mle':
+        raise ValueError("Invalid <components> value of `{}`! "
+                         "See sklearn.decomposition.PCA for "
+                         "accepted argument values.".format(components))
+
+    if nearest_days is None:
+        nearest_days = 50
 
     # load input datasets, starting with solar farm data
     (solar_site_actual_df, solar_site_forecast_df,
@@ -107,7 +131,7 @@ def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
                 load_hist_actual_df=load_zone_actual_hists,
                 load_hist_forecast_df=load_zone_forecast_hists,
                 asset_rho=dist / (10 * dist.max()), horizon_rho=5e-2,
-                num_of_components=components
+                num_of_components=components, nearest_days=nearest_days
                 )
 
             solar_engn.create_load_solar_joint_scenario(
@@ -125,9 +149,14 @@ def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
                 out_scens['Load'] = solar_engn.scenarios['load'].round(4)
                 out_scens['Solar'] = solar_engn.scenarios['solar'].round(4)
 
+            if verbosity >= 2:
+                mdl_components = solar_engn.solar_md.num_of_components
+                mdl_explained = 1 - solar_engn.solar_md.pca_residual
+
         else:
             solar_engn.fit(asset_rho=dist / (10 * dist.max()),
-                           horizon_rho=5e-2, num_of_components=components)
+                           horizon_rho=5e-2, num_of_components=components,
+                           nearest_days=nearest_days)
             solar_engn.create_scenario(scen_count, solar_site_forecast_futures)
 
             if write_csv:
@@ -138,9 +167,18 @@ def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
             else:
                 out_scens['Solar'] = solar_engn.scenarios['solar'].round(4)
 
+            if verbosity >= 2:
+                mdl_components = solar_engn.model.num_of_components
+                mdl_explained = 1 - solar_engn.model.pca_residual
+
         if not write_csv:
             with bz2.BZ2File(out_fl, 'w') as f:
                 pickle.dump(out_scens, f, protocol=-1)
+
+        if verbosity >= 2:
+            print("Used {} PCA components which explained {:.2%} of the "
+                  "variance in the solar training data.".format(mdl_components,
+                                                                mdl_explained))
 
     if verbosity >= 2:
         if ndays == 1:

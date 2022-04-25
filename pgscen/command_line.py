@@ -2,11 +2,13 @@
 
 import argparse
 import os
-import pandas as pd
 from pathlib import Path
 import bz2
 import dill as pickle
 import time
+
+import numpy as np
+import pandas as pd
 
 from .utils.data_utils import (load_load_data, load_wind_data, load_solar_data,
                                split_actuals_hist_future,
@@ -31,13 +33,22 @@ parent_parser.add_argument('--out-dir', '-o', type=str,
 parent_parser.add_argument('--scenario-count', '-n', type=int,
                            default=1000, dest='scenario_count',
                            help="how many scenarios to generate")
-parent_parser.add_argument('--verbose', '-v', action='count', default=0)
+
+parent_parser.add_argument('--nearest-days', '-d', type=int,
+                           dest='nearest_days',
+                           help="the size of the historical window to use "
+                                "when training")
+
+parent_parser.add_argument('--random-seed', type=int, dest='random_seed',
+                           help="fix the stochastic component of scenario "
+                                "generation for testing purposes")
 
 parent_parser.add_argument('--pickle', '-p', action='store_true',
                            help="store output in .p.gz format instead of .csv")
 parent_parser.add_argument('--skip-existing',
                            action='store_true', dest='skip_existing',
                            help="don't overwrite existing output files")
+parent_parser.add_argument('--verbose', '-v', action='count', default=0)
 
 parent_parser.add_argument('--test', action='store_true')
 test_path = Path(Path(__file__).parent.parent, 'test', 'resources')
@@ -50,7 +61,8 @@ def run_load():
         description="Create day ahead load scenarios."
         ).parse_args()
 
-    t7k_runner(args.start, args.days, args.out_dir, args.scenario_count,
+    t7k_runner(args.start, args.days, args.out_dir,
+               args.scenario_count, args.nearest_days, args.random_seed,
                create_load=True, write_csv=not args.pickle,
                verbosity=args.verbose, test=args.test)
 
@@ -61,7 +73,8 @@ def run_wind():
         description="Create day ahead wind scenarios."
         ).parse_args()
 
-    t7k_runner(args.start, args.days, args.out_dir, args.scenario_count,
+    t7k_runner(args.start, args.days, args.out_dir,
+               args.scenario_count, args.nearest_days, args.random_seed,
                create_wind=True, write_csv=not args.pickle,
                verbosity=args.verbose, test=args.test)
 
@@ -72,7 +85,8 @@ def run_solar():
         description="Create day ahead solar scenarios."
         ).parse_args()
 
-    t7k_runner(args.start, args.days, args.out_dir, args.scenario_count,
+    t7k_runner(args.start, args.days, args.out_dir,
+               args.scenario_count, args.nearest_days, args.random_seed,
                create_solar=True, write_csv=not args.pickle,
                verbosity=args.verbose, test=args.test)
 
@@ -83,7 +97,8 @@ def run_load_solar_joint():
         description="Create day ahead load-solar jointly modeled scenarios."
         ).parse_args()
 
-    t7k_runner(args.start, args.days, args.out_dir, args.scenario_count,
+    t7k_runner(args.start, args.days, args.out_dir,
+               args.scenario_count, args.nearest_days, args.random_seed,
                create_load_solar=True, write_csv=not args.pickle,
                verbosity=args.verbose, test=args.test)
 
@@ -99,7 +114,8 @@ def run_t7k():
                         help="use a joint load-solar model")
     args = parser.parse_args()
 
-    t7k_runner(args.start, args.days, args.out_dir, args.scenario_count,
+    t7k_runner(args.start, args.days, args.out_dir,
+               args.scenario_count, args.nearest_days, args.random_seed,
                create_load=not args.joint, create_wind=True,
                create_solar=not args.joint, create_load_solar=args.joint,
                write_csv=not args.pickle, skip_existing=args.skip_existing,
@@ -107,11 +123,14 @@ def run_t7k():
 
 
 #TODO: not sure that these if statements are the right way to structure this
-def t7k_runner(start_date, ndays, out_dir, scen_count,
-               create_load=False, create_wind=False,
+def t7k_runner(start_date, ndays, out_dir, scen_count, nearest_days,
+               random_seed, create_load=False, create_wind=False,
                create_solar=False, create_load_solar=False,
                write_csv=True, skip_existing=False, verbosity=0, test=False):
     start = ' '.join([start_date, "06:00:00"])
+
+    if random_seed:
+        np.random.seed(random_seed)
 
     # load input datasets
     if create_load or create_load_solar:
@@ -201,7 +220,7 @@ def t7k_runner(start_date, ndays, out_dir, scen_count,
                                      load_zone_forecast_hists,
                                      scenario_start_time, asset_type='load')
 
-            load_engn.fit(5e-2, 5e-2)
+            load_engn.fit(5e-2, 5e-2, nearest_days)
             load_engn.create_scenario(scen_count, load_zone_forecast_futures,
                                       bin_width_ratio=0.1, min_sample_size=400)
 
@@ -217,7 +236,7 @@ def t7k_runner(start_date, ndays, out_dir, scen_count,
                                      scenario_start_time, wind_meta_df, 'wind')
 
             dist = wind_engn.asset_distance().values
-            wind_engn.fit(dist / (10 * dist.max()), 5e-2)
+            wind_engn.fit(dist / (10 * dist.max()), 5e-2, nearest_days)
             wind_engn.create_scenario(scen_count, wind_site_forecast_futures)
 
             if write_csv:
