@@ -6,11 +6,10 @@ import pandas as pd
 import warnings
 from scipy.linalg import sqrtm
 from scipy.stats import norm
-import rpy2
 from typing import List, Dict, Tuple, Iterable, Optional
 
 from pgscen.utils.r_utils import (qdist, gaussianize, graphical_lasso, gemini,
-                                  fit_dist, get_ecdf_data, standardize)
+                                  fit_dist, standardize)
 
 
 def get_asset_list(hist_actual_df : pd.DataFrame,

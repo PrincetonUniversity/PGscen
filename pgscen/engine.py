@@ -551,7 +551,7 @@ class SolarGeminiEngine(GeminiEngine):
         self.cond_count = cond_indx
         self.asset_distance_mat = self.asset_distance()
 
-    def fit_solar_model(self) -> None:
+    def fit_solar_model(self, nearest_days: Optional[int] = None) -> None:
         """Fit each of the solar scenario models in the engine."""
 
         # for each solar model, starting with the daytime model, find the
@@ -565,10 +565,15 @@ class SolarGeminiEngine(GeminiEngine):
             else:
                 minute_range = 10
 
-            hist_dates = self.get_solar_hist_dates(
-                self.scen_start_time.floor('D'), asset_list,
-                time_range_in_minutes=minute_range
-                )
+            if nearest_days:
+                hist_dates = self.get_yearly_date_range(
+                    use_date=self.scen_start_time, num_of_days=nearest_days)
+
+            else:
+                hist_dates = self.get_solar_hist_dates(
+                    self.scen_start_time.floor('D'), asset_list,
+                    time_range_in_minutes=minute_range
+                    )
 
             # shift hours in the historical date due to utc and local time zone
             if hour >= self.time_shift:
@@ -598,7 +603,8 @@ class SolarGeminiEngine(GeminiEngine):
     def fit_load_solar_joint_model(self,
                                    load_hist_actual_df: pd.DataFrame,
                                    load_hist_forecast_df: pd.DataFrame,
-                                   load_zonal: bool = True) -> None:
+                                   load_zonal: bool = True,
+                                   nearest_days: Optional[int] = None) -> None:
         """
         This function fits a joint load/solar model for each time of day. The
         historical datasets for bus loads are given in the same format as they
@@ -613,10 +619,15 @@ class SolarGeminiEngine(GeminiEngine):
 
         # determine historical dates which have similar sunset and sunrise
         # times to the scenario date
-        day_hist_dates = self.get_solar_hist_dates(
-            self.scen_start_time.floor('D'), self.asset_list,
-            time_range_in_minutes=30
-            )
+        if nearest_days:
+            day_hist_dates = self.get_yearly_date_range(
+                use_date=self.scen_start_time, num_of_days=nearest_days)
+
+        else:
+            day_hist_dates = self.get_solar_hist_dates(
+                self.scen_start_time.floor('D'), self.asset_list,
+                time_range_in_minutes=30
+                )
 
         # shift solar historical dates by the hour of scenario start time due
         # to utc and local time zone
@@ -636,8 +647,16 @@ class SolarGeminiEngine(GeminiEngine):
         # shift load historical dates by the hour of scenario start time due to
         # utc and local time zone
         load_hour = self.scen_start_time.hour
-        load_hist_dates = self.get_yearly_date_range(
-            use_date=self.scen_start_time.floor('D'), num_of_days=60)
+
+        if nearest_days:
+            load_hist_dates = self.get_yearly_date_range(
+                use_date=self.scen_start_time.floor('D'),
+                num_of_days=nearest_days
+                )
+
+        else:
+            load_hist_dates = self.get_yearly_date_range(
+                use_date=self.scen_start_time.floor('D'), num_of_days=60)
 
         if load_hour >= self.time_shift:
             self.gemini_dict['day']['load_hist_deviation_index'] = [
@@ -737,10 +756,17 @@ class SolarGeminiEngine(GeminiEngine):
 
             # determine historical dates which have similar sunset and sunrise
             # times to the scenario date
-            solar_hist_dates = self.get_solar_hist_dates(
-                self.scen_start_time.floor('D'), asset_list,
-                time_range_in_minutes=10
-                )
+            if nearest_days:
+                solar_hist_dates = self.get_yearly_date_range(
+                    use_date=self.scen_start_time.floor('D'),
+                    num_of_days=nearest_days
+                    )
+
+            else:
+                solar_hist_dates = self.get_solar_hist_dates(
+                    self.scen_start_time.floor('D'), asset_list,
+                    time_range_in_minutes=10
+                    )
 
             # shift hours in the historical date due to utc and local time zone
             solar_hour = self.gemini_dict['cond', i]['scen_start_time'].hour
