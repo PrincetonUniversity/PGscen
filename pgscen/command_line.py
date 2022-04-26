@@ -53,6 +53,17 @@ parent_parser.add_argument('--verbose', '-v', action='count', default=0)
 parent_parser.add_argument('--test', action='store_true')
 test_path = Path(Path(__file__).parent.parent, 'test', 'resources')
 
+joint_parser = argparse.ArgumentParser(
+    'pgscen-load-solar', parents=[parent_parser],
+    description="Create day ahead load-solar jointly modeled scenarios."
+    )
+
+joint_parser.add_argument('--use-all-load-history',
+                          action='store_true', dest='use_all_load_hist',
+                          help="train load models using all out-of-sample "
+                               "historical days instead of the same "
+                               "window used for solar models")
+
 
 # tools for creating a particular type of scenario
 def run_load():
@@ -92,21 +103,19 @@ def run_solar():
 
 
 def run_load_solar_joint():
-    args = argparse.ArgumentParser(
-        'pgscen-load-solar', parents=[parent_parser],
-        description="Create day ahead load-solar jointly modeled scenarios."
-        ).parse_args()
+    args = joint_parser.parse_args()
 
     t7k_runner(args.start, args.days, args.out_dir,
                args.scenario_count, args.nearest_days, args.random_seed,
                create_load_solar=True, write_csv=not args.pickle,
+               use_all_load_hist=args.use_all_load_hist,
                verbosity=args.verbose, test=args.test)
 
 
 # tool for creating all types of scenarios at the same time
 def run_t7k():
     parser = argparse.ArgumentParser(
-        'pgscen', parents=[parent_parser],
+        'pgscen', parents=[joint_parser],
         description="Create day-ahead t7k load, wind, and solar scenarios."
         )
 
@@ -119,6 +128,7 @@ def run_t7k():
                create_load=not args.joint, create_wind=True,
                create_solar=not args.joint, create_load_solar=args.joint,
                write_csv=not args.pickle, skip_existing=args.skip_existing,
+               use_all_load_hist=args.use_all_load_hist,
                verbosity=args.verbose, test=args.test)
 
 
@@ -126,7 +136,8 @@ def run_t7k():
 def t7k_runner(start_date, ndays, out_dir, scen_count, nearest_days,
                random_seed, create_load=False, create_wind=False,
                create_solar=False, create_load_solar=False,
-               write_csv=True, skip_existing=False, verbosity=0, test=False):
+               write_csv=True, skip_existing=False, use_all_load_hist=False,
+               verbosity=0, test=False):
     start = ' '.join([start_date, "06:00:00"])
 
     if random_seed:
@@ -246,7 +257,7 @@ def t7k_runner(start_date, ndays, out_dir, scen_count, nearest_days,
                 out_scens['Wind'] = wind_engn.scenarios['wind'].round(4)
 
         if create_solar:
-            solar_engn.fit_solar_model()
+            solar_engn.fit_solar_model(nearest_days=nearest_days)
             solar_engn.create_solar_scenario(scen_count,
                                              solar_site_forecast_futures)
 
@@ -259,7 +270,9 @@ def t7k_runner(start_date, ndays, out_dir, scen_count, nearest_days,
 
         if create_load_solar:
             solar_engn.fit_load_solar_joint_model(
-                load_zone_actual_hists, load_zone_forecast_hists)
+                load_zone_actual_hists, load_zone_forecast_hists,
+                nearest_days=nearest_days, use_all_load_hist=use_all_load_hist
+                )
 
             solar_engn.create_load_solar_joint_scenario(
                 scen_count,

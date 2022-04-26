@@ -296,27 +296,37 @@ class GeminiEngine:
 
         return use_forecasts.unstack()
 
-    def get_yearly_date_range(self,
-                              use_date: pd.Timestamp,
-                              num_of_days: int = 60) -> Set[pd.Timestamp]:
-        """Get date range around a specific date."""
+    def get_yearly_date_range(
+            self,
+            use_date: pd.Timestamp, num_of_days: Optional[int] = None,
+            ) -> Set[pd.Timestamp]:
+        """Gets a historical date range around a given day for model training.
 
-        hist_dates = pd.date_range(start=self.hist_start, end=self.hist_end,
-                                   freq='D', tz='utc')
-        hist_years = hist_dates.year.unique()
-        hist_dates = set(hist_dates)
+        Arguments
+        ---------
+            use_date        The date around which the range will be centered.
+            num_of_days     The "radius" of the range. If not given, all
+                            historical days will be used instead.
 
-        # take given number of days before and after
-        near_dates = set()
-        for year in hist_years:
-            year_date = datetime(year, use_date.month, use_date.day)
+        """
+        hist_dates = set(pd.date_range(
+            start=self.hist_start, end=self.hist_end, freq='D', tz='utc'))
 
-            near_dates = near_dates.union(set(pd.date_range(
-                start=year_date - pd.Timedelta(num_of_days, unit='D'),
-                periods=2 * num_of_days + 1, freq='D', tz='utc')
-                ))
+        if num_of_days is not None:
+            near_dates = set()
+            hist_years = {hist_date.year for hist_date in hist_dates}
 
-        return hist_dates.intersection(near_dates)
+            for hist_year in hist_years:
+                year_date = datetime(hist_year, use_date.month, use_date.day)
+
+                near_dates.update(pd.date_range(
+                    start=year_date - pd.Timedelta(num_of_days, unit='D'),
+                    periods=2 * num_of_days + 1, freq='D', tz='utc')
+                    )
+
+            hist_dates &= near_dates
+
+        return hist_dates
 
     def write_to_csv(self,
                      save_dir: Union[str, Path],
@@ -604,7 +614,8 @@ class SolarGeminiEngine(GeminiEngine):
                                    load_hist_actual_df: pd.DataFrame,
                                    load_hist_forecast_df: pd.DataFrame,
                                    load_zonal: bool = True,
-                                   nearest_days: Optional[int] = None) -> None:
+                                   nearest_days: Optional[int] = None,
+                                   use_all_load_hist: bool = False) -> None:
         """
         This function fits a joint load/solar model for each time of day. The
         historical datasets for bus loads are given in the same format as they
@@ -644,11 +655,11 @@ class SolarGeminiEngine(GeminiEngine):
                 for date in day_hist_dates
                 ]
 
-        # shift load historical dates by the hour of scenario start time due to
-        # utc and local time zone
-        load_hour = self.scen_start_time.hour
+        if use_all_load_hist:
+            load_hist_dates = self.get_yearly_date_range(
+                use_date=self.scen_start_time.floor('D'), num_of_days=None)
 
-        if nearest_days:
+        elif nearest_days:
             load_hist_dates = self.get_yearly_date_range(
                 use_date=self.scen_start_time.floor('D'),
                 num_of_days=nearest_days
@@ -657,6 +668,10 @@ class SolarGeminiEngine(GeminiEngine):
         else:
             load_hist_dates = self.get_yearly_date_range(
                 use_date=self.scen_start_time.floor('D'), num_of_days=60)
+
+        # shift load historical dates by the hour of scenario start time due to
+        # utc and local time zone
+        load_hour = self.scen_start_time.hour
 
         if load_hour >= self.time_shift:
             self.gemini_dict['day']['load_hist_deviation_index'] = [
@@ -1040,7 +1055,7 @@ class SolarGeminiEngine(GeminiEngine):
                 date to be considered as similar.
 
         """
-        hist_dates = self.get_yearly_date_range(use_date)
+        hist_dates = self.get_yearly_date_range(use_date, num_of_days=60)
         asset_suns = {asset: sun(self.asset_locs[asset], date=use_date)
                       for asset in assets}
 
