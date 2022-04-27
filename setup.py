@@ -32,6 +32,7 @@ setuptools.setup(
 
             'pgscen-pca-solar=pgscen.pca_command_line:run_solar',
             'pgscen-pca-load-solar=pgscen.pca_command_line:run_load_solar',
+            'pgscen-pca=pgscen.pca_command_line:run_t7k_pca',
 
             'pgscen-rts=pgscen.rts_gmlc.command_line:run_rts',
             'pgscen-rts-joint=pgscen.rts_gmlc.command_line:run_rts_joint',

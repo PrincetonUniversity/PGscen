@@ -26,6 +26,11 @@ class PCAGeminiEngine(GeminiEngine):
                  num_of_horizons: int = 24,
                  forecast_lead_time_in_hour: int = 12,
                  us_state: str = 'Texas') -> None:
+        """
+        Prepare to train scenario generation models by first computing delay
+        times for transitional hours at sunrises and sunsets, and then
+        compiling statistics on these delay times for future use.
+        """
 
         super().__init__(solar_hist_actual_df, solar_hist_forecast_df,
                          scen_start_time, solar_meta_df, 'solar',
@@ -37,10 +42,7 @@ class PCAGeminiEngine(GeminiEngine):
         self.solar_md = None
         self.joint_md = None
 
-        ############# Compute transitional hour delay time ####################
-
-        print('computing hour delay time....')
-
+        # get unique dates for which we have historical forecasts for training
         hist_dates = solar_hist_forecast_df.groupby(
             'Issue_time').head(1).Forecast_time.dt.date.tolist()
         fcst_df = solar_hist_forecast_df.set_index('Forecast_time')
@@ -56,6 +58,8 @@ class PCAGeminiEngine(GeminiEngine):
             for asset, asset_data in self.meta_df.iterrows()
             }
 
+        # retrieve the actual and forecasted historical values for each solar
+        # generator
         for asset, actl_vals in solar_hist_actual_df.sort_index().iteritems():
             fcst_vals = fcst_df[asset]
 
@@ -63,21 +67,26 @@ class PCAGeminiEngine(GeminiEngine):
             day_data = {'Time': list(), 'Actual': list(),
                         'Forecast': list(), 'Deviation': list()}
 
+            # for each historical date, find when sunrise and sunset occurred
+            # at this generator's location...
             for hist_date in hist_dates:
                 trans_info = get_asset_transition_hour_info(asset_locs[asset],
                                                             hist_date)
 
-                # sunrise
+                # ...which is used to figure out which actual and forecasted
+                # generation values correspond to the "transitional" hours...
                 sunrise_actl = actl_vals[trans_info['sunrise']['timestep']]
                 sunrise_fcst = fcst_vals[trans_info['sunrise']['timestep']]
 
+                # ...as well as for what proportion of these transitional hours
+                # the generator could have potentially had any sunlight
                 sunrise_data.append([trans_info['sunrise']['time'],
                                      trans_info['sunrise']['timestep'],
                                      sunrise_actl, sunrise_fcst,
                                      sunrise_actl - sunrise_fcst,
                                      trans_info['sunrise']['active']])
 
-                # sunset
+                # repeat these steps for sunset hours likewise to sunrise hours
                 sunset_actl = actl_vals[trans_info['sunset']['timestep']]
                 sunset_fcst = fcst_vals[trans_info['sunset']['timestep']]
 
@@ -87,7 +96,8 @@ class PCAGeminiEngine(GeminiEngine):
                                     sunset_actl - sunset_fcst,
                                     trans_info['sunset']['active']])
 
-                # daytime
+                # collate actual and forecasted values for daytime hours taking
+                # place between the transitional hours
                 actl_rise_indx = actl_vals.index.get_loc(
                     trans_info['sunrise']['timestep']) + 1
                 actl_set_indx = actl_vals.index.get_loc(
@@ -109,7 +119,8 @@ class PCAGeminiEngine(GeminiEngine):
             sunset_df = pd.DataFrame(data=sunset_data, columns=sun_fields)
             day_df = pd.DataFrame(day_data).set_index('Time')
 
-            # figure out delay times
+            # calculate "delay" times for the asset: the maximum minutes of
+            # sunlight observed during a transitional hour without any output
             delay_dict[asset] = {
                 'sunrise': sunrise_df.groupby(
                     'Active Minutes')['Actual'].any().idxmax() - 1,
@@ -120,11 +131,11 @@ class PCAGeminiEngine(GeminiEngine):
             hist_sun_dict[asset] = {'sunrise': sunrise_df, 'sunset': sunset_df,
                                     'day': day_df}
 
-        ################ Compute transitional hour statistics #################
-
         self.trans_delay = delay_dict
         self.hist_sun_info = hist_sun_dict
 
+        # get the transitional hour info for the day for which we'll be
+        # generating scenarios, adjusted for the observed output lag intervals
         asset_horizons = {
             asset: get_asset_transition_hour_info(
                 loc, self.scen_start_time.floor('D'),

@@ -9,7 +9,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from .command_line import parent_parser
+from .command_line import parent_parser, t7k_runner
 from .utils.data_utils import (load_solar_data, load_load_data,
                                split_actuals_hist_future,
                                split_forecasts_hist_future)
@@ -23,11 +23,7 @@ pca_parser.add_argument(
          "See sklearn.decomposition.PCA for possible argument values."
     )
 
-joint_parser = argparse.ArgumentParser(
-    'pgscen-pca-load-solar', parents=[pca_parser],
-    description="Create day ahead load-solar jointly modeled scenarios."
-    )
-
+joint_parser = argparse.ArgumentParser(parents=[pca_parser], add_help=False)
 joint_parser.add_argument('--use-all-load-history',
                           action='store_true', dest='use_all_load_hist',
                           help="train load models using all out-of-sample "
@@ -48,11 +44,38 @@ def run_solar():
 
 
 def run_load_solar():
-    args = joint_parser.parse_args()
+    args = argparse.ArgumentParser(
+        'pgscen-pca-load-solar', parents=[joint_parser],
+        description="Create day ahead load-solar jointly modeled scenarios."
+        ).parse_args()
 
     t7k_pca_runner(args.start, args.days, args.out_dir, args.scenario_count,
                    args.components, args.nearest_days, args.random_seed,
                    create_load_solar=True, write_csv=not args.pickle,
+                   skip_existing=args.skip_existing,
+                   use_all_load_hist=args.use_all_load_hist,
+                   verbosity=args.verbose)
+
+
+def run_t7k_pca():
+    parser = argparse.ArgumentParser(
+        'pgscen-pca', parents=[joint_parser],
+        description="Create day-ahead t7k load, wind, and solar PCA scenarios."
+        )
+
+    parser.add_argument('--joint', action='store_true',
+                        help="use a joint load-solar model")
+    args = parser.parse_args()
+
+    t7k_runner(args.start, args.days, args.out_dir,
+               args.scenario_count, args.nearest_days, args.random_seed,
+               create_load=not args.joint, create_wind=True,
+               write_csv=not args.pickle, skip_existing=args.skip_existing,
+               verbosity=args.verbose, test=args.test)
+
+    t7k_pca_runner(args.start, args.days, args.out_dir, args.scenario_count,
+                   args.components, args.nearest_days, args.random_seed,
+                   create_load_solar=args.joint, write_csv=not args.pickle,
                    skip_existing=args.skip_existing,
                    use_all_load_hist=args.use_all_load_hist,
                    verbosity=args.verbose)
