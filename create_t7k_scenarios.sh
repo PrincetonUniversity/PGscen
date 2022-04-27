@@ -16,17 +16,30 @@
 #   -o  The directory where output files should be stored. This directory must
 #       already exist; any existing scenario files within it will NOT be
 #       overwritten.
+#
 #   -n  The number of scenarios to generate.
+#
 #   -m  The maximum runtime for each Slurm job spawned by this script, in
 #       minutes. Use smaller maximum runtimes to generate scenarios faster
 #       at the expense of having to use more cluster jobs. Maximum runtimes
 #       of 100-200 are reasonable if there are a lot of idle nodes and you
 #       want scenarios generated quickly, whereas runtimes of 500-800 are
 #       more suitable for having this pipeline run overnight.
+#
 #   -a  An optional string specifying additional options to be passed to the
 #       Slurm scheduler.
+#
 #   -j  Generate load and solar scenarios together using a joint model instead
 #       of the default behaviour in which they are modeled separately.
+#
+#   -c  Optional argument which turns on saving output scenarios in the original
+#       PGscen .csv output format. By default, scenarios are saved as compressed
+#       pickle objects containing output for all assets for each day; otherwise,
+#       a directory is created for each day which will contain .csv files for
+#       each asset in the corresponding "load", "wind", or "solar" subdirectory.
+#
+#   -p  Use models based on principal components analysis instead of conditional
+#       models for solar scenarios.
 #
 # Example usages:
 #   sh create_scenarios.sh -o <scratch-dir>/t7k_scens -n 1000 -m 150
@@ -46,9 +59,11 @@
 # default command line argument values
 opt_str=""
 joint_opt=""
+pkl_str="-p"
+pgscen_cmd="pgscen"
 
 # collect command line arguments
-while getopts :o:n:m:a:j var
+while getopts :o:n:m:a:jcp var
 do
 	case "$var" in
 	  o)  out_dir=$OPTARG;;
@@ -56,12 +71,16 @@ do
 	  m)  min_limit=$OPTARG;;
 	  a)  opt_str=$OPTARG;;
 	  j)  joint_opt="--joint";;
+	  c)  pkl_str="";;
+	  p)  pgscen_cmd="pgscen-pca";;
 	  [?])  echo "Usage: $0 " \
 	      "[-o] output directory" \
 	      "[-n] how many scenarios to generate" \
 	      "[-m] maximum time to run pipeline in minutes" \
 	      "[-a] additional Slurm scheduler options" \
 	      "[-j] generate load and solar scenarios jointly?" \
+	      "[-c] use .csv output format instead of pickled dataframes?" \
+	      "[-p] use PCA models for solar scenarios?" \
 			exit 1;;
 	esac
 done
@@ -72,6 +91,7 @@ then
   exit 1
 fi
 
+mkdir -p $out_dir/logs
 module purge
 module load anaconda3/2021.11
 conda activate pgscen
@@ -83,7 +103,7 @@ do
   use_date=$( date -d "2018-01-02 + $rand day" '+%Y-%m-%d' )
 
   start_time=$(date +%s)
-  pgscen $use_date 1 -o $out_dir -n $scen_count $joint_opt -p -v
+  $pgscen_cmd $use_date 1 -o $out_dir -n $scen_count $joint_opt $pkl_str -v
   end_time=$(date +%s)
 
   run_times+=($( echo "$end_time - $start_time" | bc ))
@@ -124,10 +144,10 @@ do
   use_days=$(( task_days < max_days ? task_days : max_days ))
 
   day_jobs+=($( sbatch --job-name=t7k_scens --time=$use_time $opt_str --mem-per-cpu=4G \
-                       --wrap=" pgscen $day_str $use_days \
-                                       -o $out_dir -n $scen_count $joint_opt \
-                                       -p --skip-existing -v " \
+                       --wrap=" $pgscen_cmd $day_str $use_days -o $out_dir \
+                                            -n $scen_count $joint_opt \
+                                            $pkl_str --skip-existing -v " \
                        --parsable \
-                       --output=$out_dir/slurm_${day_str}.out \
-                       --error=$out_dir/slurm_${day_str}.err ))
+                       --output=$out_dir/logs/slurm_${day_str}.out \
+                       --error=$out_dir/logs/slurm_${day_str}.err ))
 done
