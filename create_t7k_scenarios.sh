@@ -73,7 +73,7 @@ then
 fi
 
 module purge
-module load anaconda3/2021.5
+module load anaconda3/2021.11
 conda activate pgscen
 
 # run time trials using five randomly chosen days

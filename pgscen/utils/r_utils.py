@@ -2,7 +2,6 @@
 
 import warnings
 from typing import Union, Tuple
-from rpy2.robjects.functions import SignatureTranslatedFunction as ECDF
 from rpy2.robjects.methods import RS4 as GPD
 
 import numpy as np
@@ -173,7 +172,7 @@ def qgpd(dist: GPD, x: np.array) -> np.array:
         return ff(x)
 
 
-def fit_dist(data: np.array) -> Union[GPD, ECDF]:
+def fit_dist(data: np.array) -> Union[GPD, PGscenECDF]:
     """Fit a distribution (GPD or the emperical distribution) function."""
 
     # perturb the data if it has a point mass at zero
@@ -194,11 +193,11 @@ def fit_dist(data: np.array) -> Union[GPD, ECDF]:
                           f'GPD, using ECDF instead', RuntimeWarning)
 
             # return stats.ecdf(robjects.FloatVector(data))
-            return ECDF(data)
+            return PGscenECDF(data)
 
     else:
         # return stats.ecdf(robjects.FloatVector(data))
-        return ECDF(data)
+        return PGscenECDF(data)
 
 
 def pdist(dist: Union[GPD, PGscenECDF], x: np.array) -> np.array:
@@ -350,10 +349,6 @@ def gemini(df: pd.DataFrame,
     B = np.sqrt(fact) * WB @ Brho @ WB
 
     return A, B
-
-
-def get_ecdf_data(cdf: ECDF) -> np.array:
-    return stats.knots(cdf)
 
 
 # Beta distribution

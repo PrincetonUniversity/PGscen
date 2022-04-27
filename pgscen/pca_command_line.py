@@ -23,6 +23,17 @@ pca_parser.add_argument(
          "See sklearn.decomposition.PCA for possible argument values."
     )
 
+joint_parser = argparse.ArgumentParser(
+    'pgscen-pca-load-solar', parents=[pca_parser],
+    description="Create day ahead load-solar jointly modeled scenarios."
+    )
+
+joint_parser.add_argument('--use-all-load-history',
+                          action='store_true', dest='use_all_load_hist',
+                          help="train load models using all out-of-sample "
+                               "historical days instead of the same "
+                               "window used for solar models")
+
 
 def run_solar():
     args = argparse.ArgumentParser(
@@ -37,21 +48,20 @@ def run_solar():
 
 
 def run_load_solar():
-    args = argparse.ArgumentParser(
-        'pgscen-pca-load-solar', parents=[pca_parser],
-        description="Create day ahead load-solar jointly modeled scenarios "
-                    "using PCA features."
-        ).parse_args()
+    args = joint_parser.parse_args()
 
     t7k_pca_runner(args.start, args.days, args.out_dir, args.scenario_count,
                    args.components, args.nearest_days, args.random_seed,
                    create_load_solar=True, write_csv=not args.pickle,
-                   skip_existing=args.skip_existing, verbosity=args.verbose)
+                   skip_existing=args.skip_existing,
+                   use_all_load_hist=args.use_all_load_hist,
+                   verbosity=args.verbose)
 
 
 def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
                    nearest_days, random_seed, create_load_solar=False,
-                   write_csv=True, skip_existing=False, verbosity=0):
+                   write_csv=True, skip_existing=False,
+                   use_all_load_hist=False, verbosity=0):
     start = ' '.join([start_date, "06:00:00"])
 
     if random_seed:
@@ -131,7 +141,8 @@ def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
                 load_hist_actual_df=load_zone_actual_hists,
                 load_hist_forecast_df=load_zone_forecast_hists,
                 asset_rho=dist / (10 * dist.max()), horizon_rho=5e-2,
-                num_of_components=components, nearest_days=nearest_days
+                num_of_components=components, nearest_days=nearest_days,
+                use_all_load_hist=use_all_load_hist
                 )
 
             solar_engn.create_load_solar_joint_scenario(

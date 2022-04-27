@@ -53,11 +53,7 @@ parent_parser.add_argument('--verbose', '-v', action='count', default=0)
 parent_parser.add_argument('--test', action='store_true')
 test_path = Path(Path(__file__).parent.parent, 'test', 'resources')
 
-joint_parser = argparse.ArgumentParser(
-    'pgscen-load-solar', parents=[parent_parser],
-    description="Create day ahead load-solar jointly modeled scenarios."
-    )
-
+joint_parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
 joint_parser.add_argument('--use-all-load-history',
                           action='store_true', dest='use_all_load_hist',
                           help="train load models using all out-of-sample "
@@ -103,7 +99,10 @@ def run_solar():
 
 
 def run_load_solar_joint():
-    args = joint_parser.parse_args()
+    args = argparse.ArgumentParser(
+        'pgscen-load-solar', parents=[joint_parser],
+        description="Create day ahead load-solar jointly modeled scenarios."
+        ).parse_args()
 
     t7k_runner(args.start, args.days, args.out_dir,
                args.scenario_count, args.nearest_days, args.random_seed,

@@ -1,3 +1,4 @@
+"""Engines for generating solar scenarios using dimensionality reduction."""
 
 import numpy as np
 import pandas as pd
@@ -7,13 +8,12 @@ from scipy.stats import norm
 from sklearn.decomposition import PCA
 from astral import LocationInfo
 from astral.sun import sun
-from typing import List, Dict, Tuple, Iterable, Optional, Union
+from typing import Dict, Iterable, Optional, Union
 
 from .model import GeminiModel
 from .engine import GeminiEngine
 from .utils.r_utils import graphical_lasso, gemini, PGscenECDF, standardize
-from .utils.solar_utils import (get_yearly_date_range,
-                                get_asset_transition_hour_info)
+from .utils.solar_utils import get_asset_transition_hour_info
 
 
 class PCAGeminiEngine(GeminiEngine):
@@ -30,8 +30,9 @@ class PCAGeminiEngine(GeminiEngine):
         super().__init__(solar_hist_actual_df, solar_hist_forecast_df,
                          scen_start_time, solar_meta_df, 'solar',
                          forecast_resolution_in_minute, num_of_horizons,
-                         forecast_lead_time_in_hour)
+                         forecast_lead_time_in_hour, us_state)
 
+        # attributes for joint load-solar models
         self.load_md = None
         self.solar_md = None
         self.joint_md = None
@@ -50,7 +51,7 @@ class PCAGeminiEngine(GeminiEngine):
                       'Actual', 'Forecast', 'Deviation', 'Active Minutes']
 
         asset_locs = {
-            asset: LocationInfo(asset, 'Texas', 'USA',
+            asset: LocationInfo(asset, us_state, 'USA',
                                 asset_data.latitude, asset_data.longitude)
             for asset, asset_data in self.meta_df.iterrows()
             }
@@ -123,8 +124,6 @@ class PCAGeminiEngine(GeminiEngine):
 
         self.trans_delay = delay_dict
         self.hist_sun_info = hist_sun_dict
-        self.end_day = self.hist_forecast_df[
-            'Forecast_time'].max().strftime('%Y-%m-%d')
 
         asset_horizons = {
             asset: get_asset_transition_hour_info(
@@ -141,26 +140,14 @@ class PCAGeminiEngine(GeminiEngine):
                        for asset, horizons in asset_horizons.items()}
             }
 
-        # set time shift relative to UTC based on the state the assets are in
-        if us_state == 'Texas':
-            self.time_shift = 6
-        elif us_state == 'California':
-            self.time_shift = 8
-
-        else:
-            raise ValueError("The only US states currently supported are "
-                             "Texas and California!")
-
-        self.us_state = us_state
-
     def fit(self,
             asset_rho: float, horizon_rho: float,
             num_of_components: Union[int, float, str] = 0.99,
             nearest_days: int = 50) -> None:
 
         # need to localize historical data?
-        days = get_yearly_date_range(self.scen_start_time, end=self.end_day,
-                                     num_of_days=nearest_days)
+        days = self.get_yearly_date_range(use_date=self.scen_start_time,
+                                          num_of_days=nearest_days)
 
         self.model = PCAGeminiModel(
             self.scen_start_time, self.get_hist_df_dict(), None,
@@ -190,12 +177,12 @@ class PCAGeminiEngine(GeminiEngine):
             load_hist_forecast_df: pd.DataFrame,
             asset_rho: float, horizon_rho: float,
             num_of_components: Union[int, float, str] = 0.99,
-            nearest_days : int = 50
+            nearest_days: int = 50, use_all_load_hist: bool = False
             ) -> None:
 
         # Need to localize historical data?
-        days = get_yearly_date_range(self.scen_start_time, end=self.end_day,
-                                     num_of_days=nearest_days)
+        days = self.get_yearly_date_range(use_date=self.scen_start_time,
+                                          num_of_days=nearest_days)
 
         # fit solar asset-level model
         solar_md = PCAGeminiModel(
@@ -207,8 +194,12 @@ class PCAGeminiEngine(GeminiEngine):
 
         solar_md.pca_transform(num_of_components=num_of_components)
         solar_md.fit(asset_rho, horizon_rho)
-        dev_index = solar_md.hist_dev_df.index
         self.solar_md = solar_md
+
+        if use_all_load_hist:
+            dev_index = None
+        else:
+            dev_index = solar_md.hist_dev_df.index
 
         # fit load model to get deviations
         load_md = GeminiModel(
@@ -229,10 +220,11 @@ class PCAGeminiEngine(GeminiEngine):
 
         joint_model_start = (
                 pd.to_datetime(max(
-                    sun(LocationInfo('west', 'Texas', 'USA',
+                    sun(LocationInfo('west', self.us_state, 'USA',
                                      wst_asset.latitude,
                                      wst_asset.longitude).observer,
-                        date=dt)['sunrise'] for dt in dev_index
+                        date=dt)['sunrise']
+                    for dt in solar_md.hist_dev_df.index
                     ))
 
                 + pd.Timedelta(60
@@ -242,10 +234,11 @@ class PCAGeminiEngine(GeminiEngine):
 
         joint_model_end = (
                 pd.to_datetime(min(
-                    sun(LocationInfo('east', 'Texas', 'USA',
+                    sun(LocationInfo('east', self.us_state, 'USA',
                                      est_asset.latitude,
                                      est_asset.longitude).observer,
-                        date=dt)['sunset'] for dt in dev_index
+                        date=dt)['sunset']
+                    for dt in solar_md.hist_dev_df.index
                     ))
 
                 - pd.Timedelta(60
