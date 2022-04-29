@@ -2,6 +2,7 @@
 
 import argparse
 from pathlib import Path
+import shutil
 import bz2
 import dill as pickle
 import time
@@ -137,6 +138,15 @@ def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
 
             out_scens = dict()
 
+        if write_csv and skip_existing:
+            date_path = Path(out_dir, scenario_start_time.strftime('%Y%m%d'))
+
+            if create_load_solar and Path(date_path, 'load').exists():
+                shutil.rmtree(Path(date_path, 'load'))
+
+            if Path(date_path, 'solar').exists():
+                shutil.rmtree(Path(date_path, 'solar'))
+
         # split input datasets into training and testing subsets
         (solar_site_actual_hists,
             solar_site_actual_futures) = split_actuals_hist_future(
@@ -163,7 +173,7 @@ def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
             solar_engn.fit_load_solar_joint_model(
                 load_hist_actual_df=load_zone_actual_hists,
                 load_hist_forecast_df=load_zone_forecast_hists,
-                asset_rho=dist / (10 * dist.max()), horizon_rho=5e-2,
+                asset_rho=dist / (10 * dist.max()), pca_comp_rho=5e-2,
                 num_of_components=components, nearest_days=nearest_days,
                 use_all_load_hist=use_all_load_hist
                 )
@@ -189,7 +199,7 @@ def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
 
         else:
             solar_engn.fit(asset_rho=dist / (10 * dist.max()),
-                           horizon_rho=5e-2, num_of_components=components,
+                           pca_comp_rho=5e-2, num_of_components=components,
                            nearest_days=nearest_days)
             solar_engn.create_scenario(scen_count, solar_site_forecast_futures)
 

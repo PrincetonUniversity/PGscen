@@ -3,6 +3,7 @@
 import argparse
 import os
 from pathlib import Path
+import shutil
 import bz2
 import dill as pickle
 import time
@@ -191,6 +192,20 @@ def t7k_runner(start_date, ndays, out_dir, scen_count, nearest_days,
                 continue
 
             out_scens = dict()
+
+        if write_csv and skip_existing:
+            date_path = Path(out_dir, scenario_start_time.strftime('%Y%m%d'))
+
+            if ((create_load or create_load_solar)
+                    and Path(date_path, 'load').exists()):
+                shutil.rmtree(Path(date_path, 'load'))
+
+            if create_wind and Path(date_path, 'wind').exists():
+                shutil.rmtree(Path(date_path, 'wind'))
+
+            if ((create_solar or create_load_solar)
+                    and Path(date_path, 'solar').exists()):
+                shutil.rmtree(Path(date_path, 'solar'))
 
         # split input datasets into training and testing subsets
         if create_load or create_load_solar:

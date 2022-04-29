@@ -173,10 +173,15 @@ class GeminiEngine:
         Arguments
         ---------
             asset_rho
-                Regularization hyper-parameter governing asset precisions.
+                Hyper-parameter governing how strongly non-zero interactions
+                between generators are penalized.
             horizon_rho
-                Regularization hyper-parameter governing time point precisions.
+                Hyper-parameter governing how strongly non-zero interactions
+                between time points are penalized.
 
+            nearest_days
+                If given, will not use historical asset values more than this
+                number of days away from the given date in each year.
         """
 
         if nearest_days:
