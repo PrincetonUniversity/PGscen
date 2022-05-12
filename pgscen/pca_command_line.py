@@ -1,6 +1,7 @@
 """Interface for generating scenarios using PCA models on Texas-7k datasets."""
 
 import argparse
+import os
 from pathlib import Path
 import shutil
 import bz2
@@ -74,12 +75,38 @@ def run_t7k_pca():
                write_csv=not args.pickle, skip_existing=args.skip_existing,
                verbosity=args.verbose, test=args.test)
 
+    # to avoid output files from the non-PCA scenarios from being overwritten,
+    # we move them to a temporary directory before creating PCA scenarios
+    if args.pickle:
+        os.makedirs(str(Path(args.out_dir, 'tmp')), exist_ok=True)
+
+        scen_lbls = ["scens_{}.p.gz".format(start_time.strftime('%Y-%m-%d'))
+                     for start_time in pd.date_range(start=args.start,
+                                                     periods=args.days,
+                                                     freq='D', tz='utc')]
+
+        for scen_lbl in scen_lbls:
+            os.rename(str(Path(args.out_dir, scen_lbl)),
+                      str(Path(args.out_dir, 'tmp', scen_lbl)))
+
     t7k_pca_runner(args.start, args.days, args.out_dir, args.scenario_count,
                    args.components, args.nearest_days, args.random_seed,
                    create_load_solar=args.joint, write_csv=not args.pickle,
                    skip_existing=args.skip_existing,
                    use_all_load_hist=args.use_all_load_hist,
                    verbosity=args.verbose)
+
+    # to create the final output files we merge the PCA and the non-PCA outputs
+    if args.pickle:
+        for scen_lbl in scen_lbls:
+            with bz2.BZ2File(Path(args.out_dir, scen_lbl), 'r') as f:
+                pca_scens = pickle.load(f)
+            with bz2.BZ2File(Path(args.out_dir, 'tmp', scen_lbl), 'r') as f:
+                pca_scens.update(pickle.load(f))
+
+            os.remove(Path(args.out_dir, 'tmp', scen_lbl))
+            with bz2.BZ2File(Path(args.out_dir, scen_lbl), 'w') as f:
+                pickle.dump(pca_scens, f, protocol=-1)
 
 
 def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
