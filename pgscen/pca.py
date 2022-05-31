@@ -221,7 +221,9 @@ class PCAGeminiEngine(GeminiEngine):
             self,
             load_hist_actual_df: pd.DataFrame,
             load_hist_forecast_df: pd.DataFrame,
-            asset_rho: float, pca_comp_rho: float,
+            load_asset_rho: float, load_horizon_rho: float,
+            solar_asset_rho: float, solar_pca_comp_rho: float,
+            joint_asset_rho: float,
             num_of_components: Union[int, float, str] = 0.99,
             nearest_days: int = 50, use_all_load_hist: bool = False
             ) -> None:
@@ -239,7 +241,7 @@ class PCAGeminiEngine(GeminiEngine):
             )
 
         solar_md.pca_transform(num_of_components=num_of_components)
-        solar_md.fit(asset_rho, pca_comp_rho)
+        solar_md.fit(solar_asset_rho, solar_pca_comp_rho)
         self.solar_md = solar_md
 
         if use_all_load_hist:
@@ -255,7 +257,7 @@ class PCAGeminiEngine(GeminiEngine):
             self.num_of_horizons, self.forecast_lead_hours
             )
 
-        load_md.fit(1e-2, 1e-2)
+        load_md.fit(load_asset_rho, load_horizon_rho)
         self.load_md = load_md
 
         # get Gaussian data for the joint model
@@ -359,7 +361,7 @@ class PCAGeminiEngine(GeminiEngine):
         }
         joint_md['num_of_assets'] = len(joint_md['asset_list'])
 
-        prec = graphical_lasso(joint_md['gauss_df'], joint_md['num_of_assets'], 1e-2)
+        prec = graphical_lasso(joint_md['gauss_df'], joint_md['num_of_assets'], joint_asset_rho)
         cov = np.linalg.inv(prec)
         joint_md['asset_cov'] = pd.DataFrame(data = (cov + cov.T) / 2,
             index=joint_md['asset_list'], columns=joint_md['asset_list'])
