@@ -2,44 +2,90 @@
 import argparse
 from pathlib import Path
 import pandas as pd
+from datetime import datetime
+import random
+
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from matplotlib.dates import DateFormatter, HourLocator
+from matplotlib import ticker
 
 plt.style.use('fivethirtyeight')
-plt.rcParams['axes.facecolor'] = 'white'
-plt.rcParams['savefig.facecolor'] = 'white'
-plt.rcParams['axes.edgecolor'] = 'white'
-actual_clr, fcst_clr = "#430093", "#D9C800"
+back_clr = 'white'
+plt.rcParams['axes.facecolor'] = back_clr
+plt.rcParams['savefig.facecolor'] = back_clr
+plt.rcParams['axes.edgecolor'] = back_clr
 
 
 def plot_scenarios(scen_data, args):
     fig, ax = plt.subplots(figsize=(13, 8))
 
-    for scen, scen_vals in scen_data.loc['Simulation'].iterrows():
-        plt.plot(scen_vals, c='black', alpha=0.11, lw=0.2)
+    plt.plot(scen_data.loc['Forecast', 1], c='#FF0028', alpha=0.67, lw=5.3)
+    plt.plot(scen_data.loc['Actual', 1], c='black', alpha=0.67, lw=5.3)
 
-    plt.plot(scen_data.loc['Forecast', 1], c=fcst_clr, alpha=0.47, lw=4.1)
-    plt.plot(scen_data.loc['Actual', 1], c=actual_clr, alpha=0.47, lw=4.1)
+    lgnd_ptchs = [Patch(color='#FF0028', alpha=0.81, label="Forecast"),
+                  Patch(color='black', alpha=0.81, label="Actual")]
 
-    quant_df = scen_data.loc['Simulation'].quantile([0.25, 0.75])
-    ax.fill_between(quant_df.columns, quant_df.iloc[0], quant_df.iloc[1],
-                    color='red', alpha=0.31)
+    if args.quantiles:
+        scen_count = max(i for _, i in scen_data.index)
 
-    ax.tick_params(which='both', labelsize=15)
-    ax.grid(linewidth=0.7, alpha=0.31)
-    ax.axhline(0, lw=1.3, c='black', alpha=1)
-    ax.set_ylim((ax.get_ylim()[1] / -67, ax.get_ylim()[1]))
+        ax.set_title(args.scen_file.stem.replace('_', ' '),
+                     size=29, weight='semibold')
+        lgnd_ptchs += [Patch(color='black', alpha=0.23, label="Scenarios"),
+                       Patch(visible=False, label='')]
 
-    lgnd_ptchs = [Patch(color='black', alpha=0.23, label="Scenarios"),
-                  Patch(color='red', alpha=0.41, label="Interquartile Range"),
-                  Patch(color=fcst_clr, alpha=0.81, label="Forecast"),
-                  Patch(color=actual_clr, alpha=0.81, label="Actual")]
+        plt_scens = [('Simulation', i + 1)
+                     for i in random.sample(range(scen_count), 20)]
 
-    plt.legend(handles=lgnd_ptchs, frameon=False, fontsize=17, ncol=4, loc=8,
-               bbox_to_anchor=(0.5, -0.17), handletextpad=0.7)
+        for scen, scen_vals in scen_data.loc[plt_scens].iterrows():
+            plt.plot(scen_vals, c='black', alpha=0.23,
+                     lw=1.43, linestyle='--')
 
-    fig.savefig(Path(args.scen_file.parent.parent, "plots",
-                     "scenarios__{}.pdf".format(args.scen_file.stem)),
+        for quant, quant_clr in zip([0.25, 0.05], ['#A73200', '#D94100']):
+            quant_df = scen_data.loc['Simulation'].quantile([quant, 1 - quant])
+
+            ax.fill_between(quant_df.columns,
+                            quant_df.iloc[0], quant_df.iloc[1],
+                            color=quant_clr, alpha=0.23, linewidth=0)
+
+            lgnd_lbl = "Scenarios\n{:.0%}-{:.0%}".format(quant, 1 - quant)
+            lgnd_ptchs += [Patch(color=quant_clr, alpha=0.41, label=lgnd_lbl)]
+
+    else:
+        for scen, scen_vals in scen_data.loc['Simulation'].iterrows():
+            plt.plot(scen_vals, c='black', alpha=0.11, lw=0.2)
+
+        quant_df = scen_data.loc['Simulation'].quantile([0.25, 0.75])
+        ax.fill_between(quant_df.columns, quant_df.iloc[0], quant_df.iloc[1],
+                        color='red', alpha=0.31)
+
+        lgnd_ptchs += [
+            Patch(color='black', alpha=0.23, label="Scenarios"),
+            Patch(color='red', alpha=0.41, label="Interquartile Range")
+            ]
+
+    fig.text(0.023, 0.5, "MWh",
+             size=27, weight='semibold', rotation=90, ha='right', va='center')
+
+    ax.tick_params(which='both', labelsize=19)
+    ax.grid(linewidth=0.77, alpha=0.53)
+    ax.axhline(0, lw=1.7, c='black', alpha=1)
+    ax.set_ylim((max(ax.get_ylim()[1] / -67, scen_data.values.min() - 300),
+                 ax.get_ylim()[1]))
+
+    ax.xaxis.set_major_formatter(DateFormatter("%m/%d\n%-I%p"))
+    ax.xaxis.set_major_locator(HourLocator([0, 4, 8, 12, 16, 20]))
+    ax.yaxis.set_major_locator(ticker.MaxNLocator(10, steps=[1, 2, 5]))
+
+    plt.legend(handles=lgnd_ptchs, frameon=False, fontsize=31, ncol=3, loc=8,
+               bbox_to_anchor=(0.5, -0.53), handletextpad=0.83)
+
+    if args.quantiles:
+        plt_file = "scen-quants__{}.pdf".format(args.scen_file.stem)
+    else:
+        plt_file = "scenarios__{}.pdf".format(args.scen_file.stem)
+
+    fig.savefig(Path(args.scen_file.parent.parent, "plots", plt_file),
                 bbox_inches='tight', format='pdf')
 
 
@@ -48,11 +94,16 @@ def main():
 
     parser.add_argument("scen_file", type=Path,
                         help="a .csv containing scenarios generated by PGscen")
+    parser.add_argument("--quantiles", "-q", action='store_true',
+                        help="plot quantiles instead of individual scenarios")
     args = parser.parse_args()
 
     Path(args.scen_file.parent.parent, "plots").mkdir(exist_ok=True)
+    this_date = datetime.strptime(args.scen_file.parent.parent.stem, '%Y%m%d')
+
     scen_data = pd.read_csv(args.scen_file, index_col=[0, 1])
-    scen_data.columns = scen_data.columns.str.replace('00$', 'h', regex=True)
+    scen_data.columns = [this_date + pd.Timedelta(hours=i)
+                         for i in range(scen_data.shape[1])]
 
     plot_scenarios(scen_data, args)
 
