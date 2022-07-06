@@ -178,13 +178,17 @@ class PCAGeminiEngine(GeminiEngine):
                 number of days away from the given date in each year.
         """
 
-        # need to localize historical data?
-        days = self.get_yearly_date_range(use_date=self.scen_start_time,
-                                          num_of_days=nearest_days)
+        if nearest_days:
+            days = self.get_yearly_date_range(use_date=self.scen_start_time,
+                                              num_of_days=nearest_days)
+            dev_index = [d + pd.Timedelta(self.time_shift, unit='H')
+                         for d in days]
+
+        else:
+            dev_index = None
 
         self.model = PCAGeminiModel(
-            self.scen_start_time, self.get_hist_df_dict(), None,
-            [d + pd.Timedelta(self.time_shift, unit='H') for d in days],
+            self.scen_start_time, self.get_hist_df_dict(), None, dev_index,
             self.forecast_resolution_in_minute,
             self.num_of_horizons, self.forecast_lead_hours
             )

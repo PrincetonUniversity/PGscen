@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from datetime import datetime
+import calendar
 from operator import itemgetter
 from astral import Observer
 from astral.sun import sun
@@ -322,7 +323,13 @@ class GeminiEngine:
             hist_years = {hist_date.year for hist_date in hist_dates}
 
             for hist_year in hist_years:
-                year_date = datetime(hist_year, use_date.month, use_date.day)
+                if (not calendar.isleap(hist_year)
+                        and use_date.month == 2 and use_date.day == 29):
+                    year_date = datetime(hist_year, 3, 1)
+
+                else:
+                    year_date = datetime(hist_year,
+                                         use_date.month, use_date.day)
 
                 near_dates.update(pd.date_range(
                     start=year_date - pd.Timedelta(num_of_days, unit='D'),
@@ -438,6 +445,9 @@ class SolarGeminiEngine(GeminiEngine):
 
     """
 
+    #TODO: unify this and self.time_shift
+    time_zones = {'Texas': 'US/Central', 'California': 'US/Pacific'}
+
     def __init__(self,
                  solar_hist_actual_df: pd.DataFrame,
                  solar_hist_forecast_df: pd.DataFrame,
@@ -446,6 +456,13 @@ class SolarGeminiEngine(GeminiEngine):
                  num_of_horizons: int = 24,
                  forecast_lead_time_in_hour: int = 12,
                  us_state: str = 'Texas') -> None:
+
+        if us_state not in self.time_zones:
+            raise ValueError(
+                "Unrecognized US state `{}`!"
+                "\nAvailable states are:\n{}".format(
+                    us_state, '\n'.join(self.time_zones.keys()))
+                )
 
         super().__init__(solar_hist_actual_df, solar_hist_forecast_df,
                          scen_start_time, solar_meta_df, 'solar',
@@ -459,7 +476,8 @@ class SolarGeminiEngine(GeminiEngine):
 
         # get sunrise and sunset times for the scenario start time at each of
         # the asset locations
-        local_date = self.scen_start_time.tz_convert('US/Central').date()
+        local_date = self.scen_start_time.tz_convert(
+            self.time_zones[us_state]).date()
         asset_suns = {site: sun(loc, date=local_date)
                       for site, loc in self.asset_locs.items()}
 
@@ -1069,7 +1087,7 @@ class SolarGeminiEngine(GeminiEngine):
                 asset_suns[site][sun_time] = datetime.combine(
                     datetime.min,
                     pd.to_datetime(asset_suns[site][sun_time]).tz_convert(
-                        'US/Central').time()
+                        self.time_zones[self.us_state]).time()
                     )
 
         cur_rises = pd.Series({site: s['sunrise']
@@ -1089,7 +1107,7 @@ class SolarGeminiEngine(GeminiEngine):
                         datetime.min,
                         pd.to_datetime(
                             hist_suns[site][hist_date][sun_time]).tz_convert(
-                            'US/Central'
+                            self.time_zones[self.us_state]
                             ).time()
                         )
 

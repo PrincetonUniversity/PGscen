@@ -499,7 +499,7 @@ class GeminiModel:
 
         self.scen_gauss_df = scen_df.copy()
 
-        # add back mean and stad
+        # add back mean and standard deviation
         if not self.gauss:
             scen_df = scen_df * self.gauss_std + self.gauss_mean
             self.scen_gauss_bias_df = scen_df.copy()
@@ -510,7 +510,7 @@ class GeminiModel:
         # invert the Gaussian scenario deviations by the marginal distributions
         if not self.gauss:
             scen_means, scen_vars = scen_df.mean(), scen_df.std()
-            u_mat = norm.cdf((scen_df - scen_means) / scen_vars)
+            u_mat = norm.cdf(((scen_df - scen_means) / scen_vars).fillna(0.0))
 
             if self.conditional_gpd_dict:
                 scen_df = pd.DataFrame({

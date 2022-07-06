@@ -211,11 +211,10 @@ def t7k_runner(start_date, ndays, out_dir, scen_count, nearest_days,
         if create_load or create_load_solar:
             (load_zone_actual_hists,
                 load_zone_actual_futures) = split_actuals_hist_future(
-                    load_zone_actual_df, scen_timesteps)
-
+                        load_zone_actual_df, scen_timesteps)
             (load_zone_forecast_hists,
                 load_zone_forecast_futures) = split_forecasts_hist_future(
-                    load_zone_forecast_df, scen_timesteps)
+                        load_zone_forecast_df, scen_timesteps)
 
         # wind scenarios are in-sample because we only have a year of wind data
         if create_wind:
@@ -225,6 +224,10 @@ def t7k_runner(start_date, ndays, out_dir, scen_count, nearest_days,
             (wind_site_forecast_hists,
                 wind_site_forecast_futures) = split_forecasts_hist_future(
                     wind_site_forecast_df, scen_timesteps, in_sample=True)
+
+            wind_engn = GeminiEngine(wind_site_actual_hists,
+                                     wind_site_forecast_hists,
+                                     scenario_start_time, wind_meta_df, 'wind')
 
         if create_solar or create_load_solar:
             (solar_site_actual_hists,
@@ -256,10 +259,6 @@ def t7k_runner(start_date, ndays, out_dir, scen_count, nearest_days,
                 out_scens['Load'] = load_engn.scenarios['load'].round(4)
 
         if create_wind:
-            wind_engn = GeminiEngine(wind_site_actual_hists,
-                                     wind_site_forecast_hists,
-                                     scenario_start_time, wind_meta_df, 'wind')
-
             dist = wind_engn.asset_distance().values
             wind_engn.fit(dist / (10 * dist.max()), 5e-2, nearest_days)
             wind_engn.create_scenario(scen_count, wind_site_forecast_futures)
