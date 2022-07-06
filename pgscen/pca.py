@@ -341,8 +341,10 @@ class PCAGeminiEngine(GeminiEngine):
             )
 
         # aggregate zonal load and solar along time axis
-        load_solar_zone_gauss_df = joint_load_df.merge(solar_zone_gauss_df, how='inner',
-                                    left_index=True, right_index=True).sum(level=0, axis=1)
+        load_solar_zone_gauss_df = joint_load_df.merge(
+            solar_zone_gauss_df, how='inner',
+            left_index=True, right_index=True
+            ).sum(level=0, axis=1)
 
         # standardize zone-level solar
         (load_solar_zone_gauss_mean, load_solar_zone_gauss_std,
@@ -361,14 +363,17 @@ class PCAGeminiEngine(GeminiEngine):
             'gauss_df':load_solar_zone_gauss_df,
             'asset_list':load_solar_zone_gauss_df.columns.tolist(),
             'gauss_mean':load_solar_zone_gauss_mean,
-            'gauss_std':load_solar_zone_gauss_std,
-        }
+            'gauss_std':load_solar_zone_gauss_std
+            }
         joint_md['num_of_assets'] = len(joint_md['asset_list'])
 
-        prec = graphical_lasso(joint_md['gauss_df'], joint_md['num_of_assets'], joint_asset_rho)
+        prec = graphical_lasso(joint_md['gauss_df'],
+                               joint_md['num_of_assets'], joint_asset_rho)
+
         cov = np.linalg.inv(prec)
         joint_md['asset_cov'] = pd.DataFrame(data = (cov + cov.T) / 2,
             index=joint_md['asset_list'], columns=joint_md['asset_list'])
+
         self.joint_md = joint_md
 
     def create_load_solar_joint_scenario(
@@ -379,48 +384,54 @@ class PCAGeminiEngine(GeminiEngine):
 
         # generate joint scenarios
         sqrtcov = sqrtm(self.joint_md['asset_cov'].values).real
-        arr = sqrtcov @ np.random.randn(len(self.joint_md['asset_list']), nscen)
-            
-        joint_scen_gauss_df = pd.DataFrame(
-            data=arr.T, columns=self.joint_md['asset_list']
-            )
-        joint_scen_gauss_df = joint_scen_gauss_df * self.joint_md['gauss_std'] + self.joint_md['gauss_mean']
+        arr = sqrtcov @ np.random.randn(len(self.joint_md['asset_list']),
+                                        nscen)
 
+        joint_scen_gauss_df = pd.DataFrame(data=arr.T,
+                                           columns=self.joint_md['asset_list'])
+
+        joint_scen_gauss_df = (joint_scen_gauss_df
+                               * self.joint_md['gauss_std']
+                               + self.joint_md['gauss_mean'])
         self.joint_scen_gauss_df = joint_scen_gauss_df.copy()
 
         # separate load and solar scenarios
         load_joint_scen_gauss_df = pd.DataFrame({
-            zone: joint_scen_gauss_df[zone] 
-            for zone in self.joint_md['asset_list'] 
+            zone: joint_scen_gauss_df[zone]
+            for zone in self.joint_md['asset_list']
             if not zone.startswith('Solar_')
             })
 
         solar_joint_scen_gauss_df = pd.DataFrame({
-            zone: joint_scen_gauss_df[zone] 
-            for zone in self.joint_md['asset_list'] 
+            zone: joint_scen_gauss_df[zone]
+            for zone in self.joint_md['asset_list']
             if zone.startswith('Solar_')
             })
 
         hstart = self.joint_md['horizon_start']
         hend = self.joint_md['horizon_end']
-        eh = np.array([1. if hstart <= h <= hend else 0. for h in range(self.num_of_horizons)])
+        eh = np.array([1. if hstart <= h <= hend else 0.
+                       for h in range(self.num_of_horizons)])
 
         # generate load scenarios conditioned on the joint scenarios
-
         self.load_md.get_forecast(load_forecast_df)
         self.load_md.fit_conditional_gpd(
             'load', bin_width_ratio=0.1, min_sample_size=400)
 
-        A = np.eye(self.load_md.num_of_horizons) - \
-            np.outer(self.load_md.horizon_cov.values @ eh, eh) / \
-                np.dot(eh, self.load_md.horizon_cov.values @ eh)
+        A = (np.eye(self.load_md.num_of_horizons)
+             - np.outer(self.load_md.horizon_cov.values @ eh, eh)
+             / np.dot(eh, self.load_md.horizon_cov.values @ eh))
 
-        sqrtcov = np.kron(sqrtm(self.load_md.asset_cov.values).real, 
-            sqrtm(A @ self.load_md.horizon_cov.values @ A.T).real)
+        sqrtcov = np.kron(
+            sqrtm(self.load_md.asset_cov.values).real,
+            sqrtm(A @ self.load_md.horizon_cov.values @ A.T).real
+            )
 
-        mu = np.kron(np.eye(self.load_md.num_of_assets), 
-            (self.load_md.horizon_cov.values @ eh / \
-                np.dot(eh, self.load_md.horizon_cov.values @ eh))[:, None]) @ load_joint_scen_gauss_df.values.T
+        mu = np.kron(
+            np.eye(self.load_md.num_of_assets),
+            (self.load_md.horizon_cov.values @ eh
+             / np.dot(eh, self.load_md.horizon_cov.values @ eh))[:, None]
+            ) @ load_joint_scen_gauss_df.values.T
 
         self.load_md.generate_gauss_scenarios(nscen, sqrt_cov=sqrtcov, mu=mu)
 
@@ -430,8 +441,8 @@ class PCAGeminiEngine(GeminiEngine):
 
         # (ported conditional_multivar...)
         membership = self.meta_df.groupby('Zone').groups
-        aggregates_list = [zone[6:]
-                           for zone in solar_joint_scen_gauss_df.columns.unique(0)]
+        aggregates_list = [
+            zone[6:] for zone in solar_joint_scen_gauss_df.columns.unique(0)]
         memb_mat = np.zeros((len(aggregates_list),
                              len(self.solar_md.asset_list)))
 
@@ -441,10 +452,8 @@ class PCAGeminiEngine(GeminiEngine):
             for asset in assets:
                 memb_mat[agg_indx, self.solar_md.asset_list.index(asset)] = 1.
 
-        u_mat = np.kron(
-            memb_mat,
-            eh @ self.solar_md.pca.components_.T
-            ) @ np.diag(self.solar_md.pca_gauss_std.values)
+        u_mat = (np.kron(memb_mat, eh @ self.solar_md.pca.components_.T)
+                 @ np.diag(self.solar_md.pca_gauss_std.values))
 
         sigma = np.kron(self.solar_md.asset_cov, self.solar_md.horizon_cov)
         c_mat = sigma @ u_mat.T @ np.linalg.inv(u_mat @ sigma @ u_mat.T)
@@ -454,7 +463,7 @@ class PCAGeminiEngine(GeminiEngine):
         b_mat = (solar_joint_scen_gauss_df.values - u_mat
                  @ self.solar_md.pca_gauss_mean).T
 
-        sqrtcov = a_mat @ np.kron(sqrtm(self.solar_md.asset_cov).real, 
+        sqrtcov = a_mat @ np.kron(sqrtm(self.solar_md.asset_cov).real,
             sqrtm(self.solar_md.horizon_cov).real)
 
         mu = c_mat @ b_mat

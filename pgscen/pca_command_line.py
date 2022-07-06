@@ -7,6 +7,7 @@ import shutil
 import bz2
 import dill as pickle
 import time
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -33,7 +34,24 @@ joint_parser.add_argument('--use-all-load-history',
                                "window used for solar models")
 
 
-def run_solar():
+def parse_component(component_val) -> Union[int, float, str]:
+    if component_val.isdigit() and component_val != '0':
+        component_val = int(component_val)
+
+    elif component_val[:2] == '0.' and component_val[2:].isdigit():
+        component_val = float(component_val)
+    elif component_val[0] == '.' and component_val[1:].isdigit():
+        component_val = float(component_val)
+
+    elif component_val != 'mle':
+        raise ValueError("Invalid <components> value of `{}`! "
+                         "See sklearn.decomposition.PCA for "
+                         "accepted argument values.".format(component_val))
+
+    return component_val
+
+
+def run_solar() -> None:
     args = argparse.ArgumentParser(
         'pgscen-pca-solar', parents=[pca_parser],
         description="Create day ahead solar scenarios using PCA features."
@@ -45,7 +63,7 @@ def run_solar():
                    skip_existing=args.skip_existing, verbosity=args.verbose)
 
 
-def run_load_solar():
+def run_load_solar() -> None:
     args = argparse.ArgumentParser(
         'pgscen-pca-load-solar', parents=[joint_parser],
         description="Create day ahead load-solar jointly modeled scenarios."
@@ -59,7 +77,7 @@ def run_load_solar():
                    verbosity=args.verbose)
 
 
-def run_t7k_pca():
+def run_t7k_pca() -> None:
     parser = argparse.ArgumentParser(
         'pgscen-pca', parents=[joint_parser],
         description="Create day-ahead t7k load, wind, and solar PCA scenarios."
@@ -109,28 +127,18 @@ def run_t7k_pca():
                 pickle.dump(pca_scens, f, protocol=-1)
 
 
-def t7k_pca_runner(start_date, ndays, out_dir, scen_count, components,
-                   nearest_days, random_seed, create_load_solar=False,
-                   write_csv=True, skip_existing=False,
-                   use_all_load_hist=False, verbosity=0):
+def t7k_pca_runner(start_date: str, ndays: int, out_dir: str, scen_count: int,
+                   components: str, nearest_days: Union[int, None],
+                   random_seed: int, create_load_solar: bool = False,
+                   write_csv: bool = True, skip_existing: bool = False,
+                   use_all_load_hist: bool = False,
+                   verbosity: int = 0) -> None:
     start = ' '.join([start_date, "06:00:00"])
 
     if random_seed:
         np.random.seed(random_seed)
 
-    if components.isdigit() and components != '0':
-        components = int(components)
-
-    elif components[:2] == '0.' and components[2:].isdigit():
-        components = float(components)
-    elif components[0] == '.' and components[1:].isdigit():
-        components = float(components)
-
-    elif components != 'mle':
-        raise ValueError("Invalid <components> value of `{}`! "
-                         "See sklearn.decomposition.PCA for "
-                         "accepted argument values.".format(components))
-
+    components = parse_component(components)
     if nearest_days is None:
         nearest_days = 50
 
