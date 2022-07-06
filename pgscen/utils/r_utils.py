@@ -267,6 +267,44 @@ def gaussianize(df: pd.DataFrame) -> Tuple[dict, pd.DataFrame]:
 
     return dist_dict, gauss_df
 
+def ebic_graphical_lasso(df: pd.DataFrame, m: int, gamma: float=0.5,
+        return_rho: bool=False):
+    """
+    Wrapper for the EBICglasso model.
+
+    Arguments
+    ---------
+        df
+            The input dataset.
+        m
+            Number of input dimensions.
+
+        n
+            Number of samples.
+
+    """
+
+    assert df.shape[1] ==  m, (
+        "Expected a DataFrame with {} columns, got {}".format(m, df.shape[1]))
+
+    n = df.shape[0]
+    f = qgraph.EBICglasso
+    cov = df.cov().values
+    rcov = robjects.r.matrix(cov, nrow=m, ncol=m)
+    r_output = f(rcov, n, gamma, penalize_diagonal=False, returnAllResults=True)
+    output = dict(zip(r_output.names, list(r_output)))
+
+    ebic = output['ebic']
+    r_res = output['results']
+    res = dict(zip(r_res.names, list(r_res)))
+    opt_ebic_index = np.argmin(ebic)
+    opt_rho = res['rholist'][opt_ebic_index]
+    opt_wi = res['wi'][:, :, opt_ebic_index]
+
+    if return_rho:
+        return opt_wi, opt_rho
+    else:
+        return opt_wi
 
 def graphical_lasso(df: pd.DataFrame, m: int, rho: float):
     """

@@ -74,7 +74,7 @@ done
 
 module purge
 module load anaconda3/2021.5
-conda activate pgscen-pca
+conda activate pgscen
 
 # run time trials using five randomly chosen days
 run_times=()
