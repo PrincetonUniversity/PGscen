@@ -50,10 +50,10 @@
 #          repos/PGscen/create_t7k_scenarios.sh \
 #             -o <scratch-dir>/t7k-scens_4k -n 4000 -m 800 -j
 
-#SBATCH --job-name=t7k_scens
+#SBATCH --job-name=create_t7k-scens
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=4G
-#SBATCH --time=100
+#SBATCH --mem-per-cpu=16G
+#SBATCH --time=200
 
 
 # default command line argument values
@@ -63,24 +63,24 @@ pkl_str="-p"
 pgscen_cmd="pgscen"
 
 # collect command line arguments
-while getopts :o:n:m:a:jcp var
+while getopts :o:n:m:jcpa: var
 do
 	case "$var" in
 	  o)  out_dir=$OPTARG;;
 	  n)  scen_count=$OPTARG;;
 	  m)  min_limit=$OPTARG;;
-	  a)  opt_str=$OPTARG;;
 	  j)  joint_opt="--joint";;
 	  c)  pkl_str="";;
 	  p)  pgscen_cmd="pgscen-pca";;
+	  a)  opt_str=$OPTARG;;
 	  [?])  echo "Usage: $0 " \
 	      "[-o] output directory" \
 	      "[-n] how many scenarios to generate" \
-	      "[-m] maximum time to run pipeline in minutes" \
-	      "[-a] additional Slurm scheduler options" \
+	      "[-m] maximum time to run the pipeline, in minutes" \
 	      "[-j] generate load and solar scenarios jointly?" \
 	      "[-c] use .csv output format instead of pickled dataframes?" \
 	      "[-p] use PCA models for solar scenarios?" \
+	      "[-a] additional Slurm scheduler options" \
 			exit 1;;
 	esac
 done
@@ -91,10 +91,12 @@ then
   exit 1
 fi
 
+# create output directory; load licensed software and conda environment
 mkdir -p $out_dir/logs
 module purge
 module load anaconda3/2021.11
 conda activate pgscen
+
 
 # run time trials using five randomly chosen days
 run_times=()
@@ -143,7 +145,7 @@ do
   max_days=$(( ($( date +%s -d "2018-12-31" ) - $( date +%s -d "$day_str" )) / 86400 ))
   use_days=$(( task_days < max_days ? task_days : max_days ))
 
-  day_jobs+=($( sbatch --job-name=t7k_scens --time=$use_time $opt_str --mem-per-cpu=4G \
+  day_jobs+=($( sbatch --job-name=t7k_scens --time=$use_time $opt_str --mem-per-cpu=16G \
                        --wrap=" $pgscen_cmd $day_str $use_days -o $out_dir \
                                             -n $scen_count $joint_opt \
                                             $pkl_str --skip-existing -v " \

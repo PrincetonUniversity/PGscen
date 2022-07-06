@@ -30,6 +30,7 @@ joint_parser.add_argument('--use-all-load-history',
                                "window used for solar models")
 
 
+#TODO: RTS solar models seem to be numerically unstable — why?
 def run_rts():
     args = argparse.ArgumentParser(
         'pgscen-rts', parents=[rts_parser],

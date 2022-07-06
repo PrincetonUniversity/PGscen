@@ -17,21 +17,31 @@
 #       was checked out; alternatively, once can use the
 #       downloads/rts_gmlc/RTS-GMLC subdirectory created in Prescient once the
 #       prescient/downloaders/rts_gmlc.py script has been run.
+#
 #   -o  The directory where output files should be stored. This directory must
 #       already exist; any existing scenario files within it will NOT be
 #       overwritten.
+#
 #   -n  The number of scenarios to generate.
+#
 #   -m  The maximum runtime for each Slurm job spawned by this script, in
 #       minutes. Use smaller maximum runtimes to generate scenarios faster
 #       at the expense of having to use more cluster jobs. Maximum runtimes
 #       of 100-200 are reasonable if there are a lot of idle nodes and you
 #       want scenarios generated quickly, whereas runtimes of 500-800 are
 #       more suitable for having this pipeline run overnight.
+#
+#   -j  Generate load and solar scenarios together using a joint model instead
+#       of the default behaviour in which they are modeled separately.
+#
 #   -c  Optional argument which turns on saving output scenarios in the original
 #       PGscen .csv output format. By default, scenarios are saved as compressed
 #       pickle objects containing output for all assets for each day; otherwise,
 #       a directory is created for each day which will contain .csv files for
 #       each asset in the corresponding "load", "wind", or "solar" subdirectory.
+#
+#   -p  Use models based on principal components analysis instead of conditional
+#       models for solar scenarios.
 #
 # Example usages:
 #   sh create_scenarios.sh -i <data-dir>/RTS-GMLC -o <scratch-dir>/rts_scens \
@@ -47,33 +57,37 @@
 
 #SBATCH --job-name=create_rts-scens
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=4G
+#SBATCH --mem-per-cpu=16G
 #SBATCH --time=100
 
 
 # default command line argument values
 opt_str=""
-scen_cmd="pgscen-rts"
-csv_str="--pickle"
+joint_opt=""
+pkl_str="-p"
+pgscen_cmd="pgscen-rts"
 
 # collect command line arguments
-while getopts :i:o:n:m:a:jc var
+while getopts :i:o:n:m:jcpa: var
 do
 	case "$var" in
 	  i)  in_dir=$OPTARG;;
 	  o)  out_dir=$OPTARG;;
 	  n)  scen_count=$OPTARG;;
 	  m)  min_limit=$OPTARG;;
+	  j)  joint_opt="--joint";;
+	  c)  pkl_str="";;
+	  p)  pgscen_cmd="pgscen-rts-pca";;
 	  a)  opt_str=$OPTARG;;
-	  j)  scen_cmd="pgscen-rts-joint";;
-	  c)  csv_str="";;
 	  [?])  echo "Usage: $0 " \
-	      "[-i] input directory" \
+	      "[-i] directory where RTS-GMLC repo is checked out" \
 	      "[-o] output directory" \
 	      "[-n] how many scenarios to generate" \
-	      "[-m] maximum time to run in minutes" \
-	      "[-a] additional Slurm scheduler options" \
+	      "[-m] maximum time to run the pipeline, in minutes" \
 	      "[-j] generate load and solar scenarios jointly?" \
+	      "[-c] use .csv output format instead of pickled dataframes?" \
+	      "[-p] use PCA models for solar scenarios?" \
+	      "[-a] additional Slurm scheduler options" \
 			exit 1;;
 	esac
 done
@@ -84,9 +98,12 @@ then
   exit 1
 fi
 
+# create output directory; load licensed software and conda environment
+mkdir -p $out_dir/logs
 module purge
-module load anaconda3/2021.5
+module load anaconda3/2021.11
 conda activate pgscen
+
 
 # run time trials using five randomly chosen days
 run_times=()
@@ -95,7 +112,7 @@ do
   use_date=$( date -d "2020-01-01 + $rand day" '+%Y-%m-%d' )
 
   start_time=$(date +%s)
-  eval "$scen_cmd $use_date 1 $in_dir -o $out_dir -n $scen_count $csv_str -v"
+  $pgscen_cmd $use_date 1 $in_dir -o $out_dir -n $scen_count $joint_opt $pkl_str -v
   end_time=$(date +%s)
 
   run_times+=($( echo "$end_time - $start_time" | bc ))
@@ -109,10 +126,16 @@ min_time=$( echo "$sort_times" | head -n1 )
 max_time=$( echo "$sort_times" | tail -n1 )
 
 day_time=$(( max_time + (max_time - min_time) ))
-task_size=$( printf %.0f $( bc <<< "$min_limit * 60 / ($day_time * 1.17)" ))
+task_size=$( printf %.0f $( bc <<< "$min_limit * 60 / ($day_time * 1.23)" ))
 ntasks=$(( 364 / task_size + 1 ))
 task_days=$(( 364 / ntasks + 1 ))
 use_time=$( printf %.0f $( bc <<< "$task_days * $day_time * 1.13 / 60" ))
+
+# make sure we don't end up on the testing queue
+if [ "$use_time" -le 61 ];
+then
+  use_time=62
+fi
 
 # break the year into evenly-sized chunks and generate scenarios for each
 # chunk using its own Slurm job
@@ -128,11 +151,11 @@ do
   max_days=$(( ($( date +%s -d "2020-12-31" ) - $( date +%s -d "$day_str" )) / 86400 ))
   use_days=$(( task_days < max_days ? task_days : max_days ))
 
-  day_jobs+=($( sbatch --job-name=rts-scens --time=$use_time $opt_str --mem-per-cpu=2G \
-                       --wrap=" $scen_cmd $day_str $task_days \
-                                          $in_dir -o $out_dir -n $scen_count \
-                                          $csv_str --skip-existing -v " \
+  day_jobs+=($( sbatch --job-name=rts-scens --time=$use_time "$opt_str" --mem-per-cpu=16G \
+                       --wrap=" $pgscen_cmd $day_str $use_days $in_dir -o $out_dir \
+                                            -n $scen_count $joint_opt \
+                                            $pkl_str --skip-existing -v " \
                        --parsable \
-                       --output=$out_dir/slurm_${day_str}.out \
-                       --error=$out_dir/slurm_${day_str}.err ))
+                       --output=$out_dir/logs/slurm_${day_str}.out \
+                       --error=$out_dir/logs/slurm_${day_str}.err ))
 done
