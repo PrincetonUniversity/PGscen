@@ -12,6 +12,7 @@ import pandas as pd
 
 from ..command_line import parent_parser
 from ..engine import GeminiEngine, SolarGeminiEngine
+from ..scoring import compute_energy_scores, compute_variograms
 
 from .data_utils import load_load_data, load_wind_data, load_solar_data
 from ..utils.data_utils import (split_actuals_hist_future,
@@ -41,7 +42,8 @@ def run_rts():
                args.scenario_count, args.nearest_days, args.random_seed,
                create_load=True, create_wind=True, create_solar=True,
                write_csv=not args.pickle, skip_existing=args.skip_existing,
-               verbosity=args.verbose)
+               get_energy_scores=args.energy_scores,
+               get_variograms=args.variograms, verbosity=args.verbose)
 
 
 def run_rts_joint():
@@ -55,14 +57,15 @@ def run_rts_joint():
                create_load=False, create_wind=True, create_load_solar=True,
                write_csv=not args.pickle, skip_existing=args.skip_existing,
                use_all_load_hist=args.use_all_load_hist,
-               verbosity=args.verbose)
+               get_energy_scores=args.energy_scores,
+               get_variograms=args.variograms, verbosity=args.verbose)
 
 
 def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
                random_seed, create_load=False, create_wind=False,
                create_solar=False, create_load_solar=False,
                write_csv=True, skip_existing=False, use_all_load_hist=False,
-               verbosity=0):
+               get_energy_scores=False, get_variograms=False, verbosity=0):
     start = ' '.join([start_date, "08:00:00"])
 
     if random_seed:
@@ -91,6 +94,11 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
 
         if verbosity >= 1:
             print("Creating RTS-GMLC scenarios for: {}".format(date_lbl))
+
+        if get_energy_scores:
+            energy_scores = dict()
+        if get_variograms:
+            variograms = dict()
 
         if not write_csv:
             out_fl = Path(out_dir, "scens_{}.p.gz".format(date_lbl))
@@ -158,6 +166,18 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
             load_engn.create_scenario(scen_count, load_zone_forecast_futures,
                                       bin_width_ratio=0.1, min_sample_size=400)
 
+            if get_energy_scores:
+                energy_scores['Load'] = compute_energy_scores(
+                    load_engn.scenarios['load'],
+                    load_zone_actual_df, load_zone_forecast_df
+                    )
+
+            if get_variograms:
+                variograms['Load'] = compute_variograms(
+                    load_engn.scenarios['load'],
+                    load_zone_actual_df, load_zone_forecast_df
+                    )
+
             if write_csv:
                 load_engn.write_to_csv(out_dir, load_zone_actual_futures,
                                        write_forecasts=True)
@@ -169,6 +189,18 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
             wind_engn.fit(dist / (10 * dist.max()), 5e-2, nearest_days)
             wind_engn.create_scenario(scen_count, wind_site_forecast_futures)
 
+            if get_energy_scores:
+                energy_scores['Wind'] = compute_energy_scores(
+                    wind_engn.scenarios['wind'],
+                    wind_site_actual_df, wind_site_forecast_df
+                    )
+
+            if get_variograms:
+                variograms['Wind'] = compute_variograms(
+                    wind_engn.scenarios['wind'],
+                    wind_site_actual_df, wind_site_forecast_df
+                    )
+
             if write_csv:
                 wind_engn.write_to_csv(out_dir, wind_site_actual_futures,
                                        write_forecasts=True)
@@ -179,6 +211,18 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
             solar_engn.fit_solar_model(nearest_days=nearest_days)
             solar_engn.create_solar_scenario(scen_count,
                                              solar_site_forecast_futures)
+
+            if get_energy_scores:
+                energy_scores['Solar'] = compute_energy_scores(
+                    solar_engn.scenarios['solar'],
+                    solar_site_actual_df, solar_site_forecast_df
+                    )
+
+            if get_variograms:
+                variograms['Solar'] = compute_variograms(
+                    solar_engn.scenarios['solar'],
+                    solar_site_actual_df, solar_site_forecast_df
+                    )
 
             if write_csv:
                 solar_engn.write_to_csv(out_dir,
@@ -198,6 +242,26 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
                 load_zone_forecast_futures, solar_site_forecast_futures
                 )
 
+            if get_energy_scores:
+                energy_scores['Load'] = compute_energy_scores(
+                    solar_engn.scenarios['load'],
+                    load_zone_actual_df, load_zone_forecast_df
+                    )
+                energy_scores['Solar'] = compute_energy_scores(
+                    solar_engn.scenarios['solar'],
+                    solar_site_actual_df, solar_site_forecast_df
+                    )
+
+            if get_variograms:
+                variograms['Load'] = compute_variograms(
+                    solar_engn.scenarios['load'],
+                    load_zone_actual_df, load_zone_forecast_df
+                    )
+                variograms['Solar'] = compute_variograms(
+                    solar_engn.scenarios['solar'],
+                    solar_site_actual_df, solar_site_forecast_df
+                    )
+
             if write_csv:
                 solar_engn.write_to_csv(out_dir,
                                         {'load': load_zone_actual_futures,
@@ -210,6 +274,18 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
         if not write_csv:
             with bz2.BZ2File(out_fl, 'w') as f:
                 pickle.dump(out_scens, f, protocol=-1)
+
+        if get_energy_scores:
+            with bz2.BZ2File(Path(out_fl.parent,
+                                  'escores_{}.p.gz'.format(date_lbl)),
+                             'w') as f:
+                pickle.dump(energy_scores, f, protocol=-1)
+
+        if get_variograms:
+            with bz2.BZ2File(Path(out_fl.parent,
+                                  'varios_{}.p.gz'.format(date_lbl)),
+                             'w') as f:
+                pickle.dump(variograms, f, protocol=-1)
 
     if verbosity >= 2:
         if ndays == 1:

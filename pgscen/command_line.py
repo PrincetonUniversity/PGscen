@@ -51,6 +51,12 @@ parent_parser.add_argument('--skip-existing',
                            help="don't overwrite existing output files")
 parent_parser.add_argument('--verbose', '-v', action='count', default=0)
 
+parent_parser.add_argument('--energy-scores',
+                           action='store_true', dest='energy_scores',
+                           help="quantify scenario quality with energy scores")
+parent_parser.add_argument('--variograms', action='store_true',
+                           help="quantify scenario quality with variograms")
+
 parent_parser.add_argument('--test', action='store_true')
 test_path = Path(Path(__file__).parent.parent, 'test', 'resources')
 
