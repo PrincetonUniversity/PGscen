@@ -8,6 +8,19 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 
+# Command Line Usage Examples
+# python3 01_construct_db.py '/scratch/gpfs/jf3375/data/scenario_data/v0.4.1-20k'
+# '/scratch/gpfs/jf3375/output/scenario_data/v0.4.1-20k' 'Scenario' —energy_type 'Wind'
+#
+# python3 01_construct_db.py '/scratch/gpfs/jf3375/data/scenario_data/v0.4.1-20k'
+# '/scratch/gpfs/jf3375/output/scenario_data/v0.4.1-20k' 'Scenario' —energy_type 'Load'
+#
+# python3 01_construct_db.py '/scratch/gpfs/jf3375/data/scenario_data/v0.4.1-20k'
+# '/scratch/gpfs/jf3375/output/scenario_data/v0.4.1-20k' 'Scenario' —energy_type 'Solar'
+#
+# python3 01_construct_db.py '/scratch/gpfs/jf3375/data/scenario_data/v0.4.1-20k'
+# '/scratch/gpfs/jf3375/output/score_data/v0.4.1-20k' 'Scores'
+
 def main():
     parser = argparse.ArgumentParser(description='Enter directories to merge and compress data files')
 
