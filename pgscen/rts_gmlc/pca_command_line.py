@@ -43,11 +43,11 @@ def run_solar() -> None:
 
     rts_pca_runner(args.start, args.days, args.rts_dir, args.out_dir,
                    args.scenario_count, args.components, args.nearest_days,
-                   args.random_seed, create_load_solar=False,
-                   write_csv=not args.pickle, skip_existing=args.skip_existing,
+                   args.asset_rho, args.time_rho, args.random_seed,
+                   create_load_solar=False, write_csv=not args.pickle,
+                   skip_existing=args.skip_existing,
                    get_energy_scores=args.energy_scores,
-                   get_variograms=args.variograms,
-                   verbosity=args.verbose)
+                   get_variograms=args.variograms, verbosity=args.verbose)
 
 
 def run_load_solar() -> None:
@@ -58,8 +58,9 @@ def run_load_solar() -> None:
 
     rts_pca_runner(args.start, args.days, args.rts_dir, args.out_dir,
                    args.scenario_count, args.components, args.nearest_days,
-                   args.random_seed, create_load_solar=True,
-                   write_csv=not args.pickle, skip_existing=args.skip_existing,
+                   args.asset_rho, args.time_rho, args.random_seed,
+                   create_load_solar=True, write_csv=not args.pickle,
+                   skip_existing=args.skip_existing,
                    get_energy_scores=args.energy_scores,
                    get_variograms=args.variograms,
                    use_all_load_hist=args.use_all_load_hist,
@@ -77,12 +78,12 @@ def run_rts_pca() -> None:
     args = parser.parse_args()
 
     rts_runner(args.start, args.days, args.rts_dir, args.out_dir,
-               args.scenario_count, args.nearest_days, args.random_seed,
-               create_load=not args.joint, create_wind=True,
-               write_csv=not args.pickle, skip_existing=args.skip_existing,
+               args.scenario_count, args.nearest_days, args.asset_rho,
+               args.time_rho, args.random_seed, create_load=not args.joint,
+               create_wind=True, write_csv=not args.pickle,
+               skip_existing=args.skip_existing,
                get_energy_scores=args.energy_scores,
-               get_variograms=args.variograms,
-               verbosity=args.verbose)
+               get_variograms=args.variograms, verbosity=args.verbose)
 
     # to avoid output files from the non-PCA scenarios from being overwritten,
     # we move them to a temporary directory before creating PCA scenarios
@@ -101,31 +102,32 @@ def run_rts_pca() -> None:
     if args.energy_scores:
         os.makedirs(str(Path(args.out_dir, 'tmp')), exist_ok=True)
 
-        scen_lbls = ["escores_{}.p.gz".format(start_time.strftime('%Y-%m-%d'))
+        escr_lbls = ["escores_{}.p.gz".format(start_time.strftime('%Y-%m-%d'))
                      for start_time in pd.date_range(start=args.start,
                                                      periods=args.days,
                                                      freq='D', tz='utc')]
 
-        for scen_lbl in scen_lbls:
-            os.rename(str(Path(args.out_dir, scen_lbl)),
-                      str(Path(args.out_dir, 'tmp', scen_lbl)))
+        for escr_lbl in escr_lbls:
+            os.rename(str(Path(args.out_dir, escr_lbl)),
+                      str(Path(args.out_dir, 'tmp', escr_lbl)))
 
     if args.variograms:
         os.makedirs(str(Path(args.out_dir, 'tmp')), exist_ok=True)
 
-        scen_lbls = ["varios_{}.p.gz".format(start_time.strftime('%Y-%m-%d'))
+        vrgm_lbls = ["varios_{}.p.gz".format(start_time.strftime('%Y-%m-%d'))
                      for start_time in pd.date_range(start=args.start,
                                                      periods=args.days,
                                                      freq='D', tz='utc')]
 
-        for scen_lbl in scen_lbls:
-            os.rename(str(Path(args.out_dir, scen_lbl)),
-                      str(Path(args.out_dir, 'tmp', scen_lbl)))
+        for vrgm_lbl in vrgm_lbls:
+            os.rename(str(Path(args.out_dir, vrgm_lbl)),
+                      str(Path(args.out_dir, 'tmp', vrgm_lbl)))
 
     rts_pca_runner(args.start, args.days, args.rts_dir, args.out_dir,
                    args.scenario_count, args.components, args.nearest_days,
-                   args.random_seed, create_load_solar=args.joint,
-                   write_csv=not args.pickle, skip_existing=args.skip_existing,
+                   args.asset_rho, args.time_rho, args.random_seed,
+                   create_load_solar=args.joint, write_csv=not args.pickle,
+                   skip_existing=args.skip_existing,
                    get_energy_scores=args.energy_scores,
                    get_variograms=args.variograms,
                    use_all_load_hist=args.use_all_load_hist,
@@ -143,13 +145,36 @@ def run_rts_pca() -> None:
             with bz2.BZ2File(Path(args.out_dir, scen_lbl), 'w') as f:
                 pickle.dump(pca_scens, f, protocol=-1)
 
+    if args.energy_scores:
+        for escr_lbl in escr_lbls:
+            with bz2.BZ2File(Path(args.out_dir, escr_lbl), 'r') as f:
+                pca_scens = pickle.load(f)
+            with bz2.BZ2File(Path(args.out_dir, 'tmp', escr_lbl), 'r') as f:
+                pca_scens.update(pickle.load(f))
+
+            os.remove(Path(args.out_dir, 'tmp', escr_lbl))
+            with bz2.BZ2File(Path(args.out_dir, escr_lbl), 'w') as f:
+                pickle.dump(pca_scens, f, protocol=-1)
+
+    if args.variograms:
+        for vrgm_lbl in vrgm_lbls:
+            with bz2.BZ2File(Path(args.out_dir, vrgm_lbl), 'r') as f:
+                pca_scens = pickle.load(f)
+            with bz2.BZ2File(Path(args.out_dir, 'tmp', vrgm_lbl), 'r') as f:
+                pca_scens.update(pickle.load(f))
+
+            os.remove(Path(args.out_dir, 'tmp', vrgm_lbl))
+            with bz2.BZ2File(Path(args.out_dir, vrgm_lbl), 'w') as f:
+                pickle.dump(pca_scens, f, protocol=-1)
+
 
 #TODO: lot of overlap here with the t7k PCA runner
 def rts_pca_runner(start_date: str, ndays: int, rts_dir: str, out_dir: str,
                    scen_count: int, components: str,
-                   nearest_days: Union[int, None], random_seed: int,
-                   create_load_solar: bool = False,
-                   write_csv: bool = True, skip_existing: bool = False,
+                   nearest_days: Union[int, None], asset_rho: float,
+                   time_rho: float, random_seed: int,
+                   create_load_solar: bool = False, write_csv: bool = True,
+                   skip_existing: bool = False,
                    get_energy_scores: bool = False,
                    get_variograms: bool = False,
                    use_all_load_hist: bool = False,
@@ -280,8 +305,8 @@ def rts_pca_runner(start_date: str, ndays: int, rts_dir: str, out_dir: str,
                 mdl_explained = 1 - solar_engn.solar_md.pca_residual
 
         else:
-            solar_engn.fit(asset_rho=dist / (10 * dist.max()),
-                           pca_comp_rho=5e-2, num_of_components=components,
+            solar_engn.fit(asset_rho=2 * asset_rho * dist / dist.max(),
+                           pca_comp_rho=time_rho, num_of_components=components,
                            nearest_days=nearest_days)
             solar_engn.create_scenario(scen_count, solar_site_forecast_futures)
 

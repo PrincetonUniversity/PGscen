@@ -39,9 +39,10 @@ def run_rts():
         ).parse_args()
 
     rts_runner(args.start, args.days, args.rts_dir, args.out_dir,
-               args.scenario_count, args.nearest_days, args.random_seed,
-               create_load=True, create_wind=True, create_solar=True,
-               write_csv=not args.pickle, skip_existing=args.skip_existing,
+               args.scenario_count, args.nearest_days, args.asset_rho,
+               args.time_rho, args.random_seed, create_load=True,
+               create_wind=True, create_solar=True, write_csv=not args.pickle,
+               skip_existing=args.skip_existing,
                get_energy_scores=args.energy_scores,
                get_variograms=args.variograms, verbosity=args.verbose)
 
@@ -53,8 +54,9 @@ def run_rts_joint():
         ).parse_args()
 
     rts_runner(args.start, args.days, args.rts_dir, args.out_dir,
-               args.scenario_count, args.nearest_days, args.random_seed,
-               create_load=False, create_wind=True, create_load_solar=True,
+               args.scenario_count, args.nearest_days, args.asset_rho,
+               args.time_rho, args.random_seed, create_load=False,
+               create_wind=True, create_load_solar=True,
                write_csv=not args.pickle, skip_existing=args.skip_existing,
                use_all_load_hist=args.use_all_load_hist,
                get_energy_scores=args.energy_scores,
@@ -62,8 +64,8 @@ def run_rts_joint():
 
 
 def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
-               random_seed, create_load=False, create_wind=False,
-               create_solar=False, create_load_solar=False,
+               asset_rho, time_rho, random_seed, create_load=False,
+               create_wind=False, create_solar=False, create_load_solar=False,
                write_csv=True, skip_existing=False, use_all_load_hist=False,
                get_energy_scores=False, get_variograms=False, verbosity=0):
     start = ' '.join([start_date, "08:00:00"])
@@ -162,7 +164,7 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
                                      load_zone_forecast_hists,
                                      scenario_start_time, asset_type='load')
 
-            load_engn.fit(5e-2, 5e-2, nearest_days)
+            load_engn.fit(asset_rho, time_rho, nearest_days)
             load_engn.create_scenario(scen_count, load_zone_forecast_futures,
                                       bin_width_ratio=0.1, min_sample_size=400)
 
@@ -186,7 +188,8 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
 
         if create_wind:
             dist = wind_engn.asset_distance().values
-            wind_engn.fit(dist / (10 * dist.max()), 5e-2, nearest_days)
+            wind_engn.fit(2 * asset_rho * dist / dist.max(), time_rho,
+                          nearest_days)
             wind_engn.create_scenario(scen_count, wind_site_forecast_futures)
 
             if get_energy_scores:

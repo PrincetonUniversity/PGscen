@@ -40,6 +40,11 @@ parent_parser.add_argument('--nearest-days', '-d', type=int,
                            help="the size of the historical window to use "
                                 "when training")
 
+parent_parser.add_argument('--asset-rho', type=float,
+                           default=0.05, dest='asset_rho')
+parent_parser.add_argument('--time-rho', type=float,
+                           default=0.05, dest='time_rho')
+
 parent_parser.add_argument('--random-seed', type=int, dest='random_seed',
                            help="fix the stochastic component of scenario "
                                 "generation for testing purposes")

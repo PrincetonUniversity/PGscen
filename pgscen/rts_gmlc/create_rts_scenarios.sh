@@ -107,15 +107,20 @@ conda activate pgscen
 
 # run time trials using five randomly chosen days
 run_times=()
+echo "Starting five trials to estimate runtimes for one day of PGscen..."
+
 for rand in $( shuf -i 0-363 -n 5 );
 do
   use_date=$( date -d "2020-01-01 + $rand day" '+%Y-%m-%d' )
 
   start_time=$(date +%s)
-  $pgscen_cmd $use_date 1 $in_dir -o $out_dir -n $scen_count $joint_opt $pkl_str -v
+  $pgscen_cmd $use_date 1 $in_dir -o $out_dir -n $scen_count $joint_opt $pkl_str -v \
+              --energy-scores --variograms
   end_time=$(date +%s)
 
-  run_times+=($( echo "$end_time - $start_time" | bc ))
+  run_time=$( echo "$end_time - $start_time" | bc )
+  echo "Time trial for" $use_date "completed in" $run_time "seconds."
+  run_times+=($run_time)
 done
 
 # calculate a conservative estimate of the worst-case runtime of a single day
@@ -125,16 +130,16 @@ sort_times=$( echo "${run_times[*]}" | sort -n )
 min_time=$( echo "$sort_times" | head -n1 )
 max_time=$( echo "$sort_times" | tail -n1 )
 
-day_time=$(( max_time + (max_time - min_time) ))
-task_size=$( printf %.0f $( bc <<< "$min_limit * 60 / ($day_time * 1.23)" ))
+day_time=$(( 13 * max_time / 7 ))
+task_size=$( printf %.0f $( bc <<< "$min_limit * 60 / $day_time" ))
 ntasks=$(( 364 / task_size + 1 ))
 task_days=$(( 364 / ntasks + 1 ))
-use_time=$( printf %.0f $( bc <<< "$task_days * $day_time * 1.13 / 60" ))
+use_time=$( printf %.0f $( bc <<< "$task_days * $day_time / 60" ))
 
 # make sure we don't end up on the testing queue
-if [ "$use_time" -le 61 ];
+if [ "$use_time" -lt 65 ];
 then
-  use_time=62
+  use_time=65
 fi
 
 # break the year into evenly-sized chunks and generate scenarios for each
@@ -153,8 +158,8 @@ do
 
   day_jobs+=($( sbatch --job-name=rts-scens --time=$use_time "$opt_str" --mem-per-cpu=16G \
                        --wrap=" $pgscen_cmd $day_str $use_days $in_dir -o $out_dir \
-                                            -n $scen_count $joint_opt \
-                                            $pkl_str --skip-existing -v " \
+                                            -n $scen_count $joint_opt $pkl_str --skip-existing -v \
+                                            --energy-scores --variograms " \
                        --parsable \
                        --output=$out_dir/logs/slurm_${day_str}.out \
                        --error=$out_dir/logs/slurm_${day_str}.err ))
