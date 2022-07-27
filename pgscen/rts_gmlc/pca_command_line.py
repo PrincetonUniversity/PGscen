@@ -92,6 +92,14 @@ def run_rts_pca() -> None:
                            skip_existing=args.skip_existing,
                            get_energy_scores=args.energy_scores,
                            get_variograms=args.variograms, tuning=args.tuning, verbosity=args.verbose)
+    else:
+        rts_runner(args.start, args.days, args.rts_dir, args.out_dir,
+                   args.scenario_count, args.nearest_days, args.asset_rho,
+                   args.time_rho, args.random_seed, create_load=not args.joint,
+                   create_wind=True, write_csv=not args.pickle,
+                   skip_existing=args.skip_existing,
+                   get_energy_scores=args.energy_scores,
+                   get_variograms=args.variograms, tuning=args.tuning, verbosity=args.verbose)
 
     # to avoid output files from the non-PCA scenarios from being overwritten,
     # we move them to a temporary directory before creating PCA scenarios
@@ -143,6 +151,16 @@ def run_rts_pca() -> None:
                                get_variograms=args.variograms,
                                use_all_load_hist=args.use_all_load_hist,
                                verbosity=args.verbose)
+    else:
+        rts_pca_runner(args.start, args.days, args.rts_dir, args.out_dir,
+                       args.scenario_count, args.components, args.nearest_days,
+                       args.asset_rho, args.time_rho, args.random_seed,
+                       create_load_solar=args.joint, write_csv=not args.pickle,
+                       skip_existing=args.skip_existing,
+                       get_energy_scores=args.energy_scores,
+                       get_variograms=args.variograms,
+                       use_all_load_hist=args.use_all_load_hist,
+                       verbosity=args.verbose)
 
     # to create the final output files we merge the PCA and the non-PCA outputs
     if args.pickle & args.tuning:
