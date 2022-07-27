@@ -67,7 +67,7 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
                asset_rho, time_rho, random_seed, create_load=False,
                create_wind=False, create_solar=False, create_load_solar=False,
                write_csv=True, skip_existing=False, use_all_load_hist=False,
-               get_energy_scores=False, get_variograms=False, verbosity=0):
+               get_energy_scores=False, get_variograms=False, tuning=False, verbosity=0):
     start = ' '.join([start_date, "08:00:00"])
 
     if random_seed:
@@ -102,7 +102,7 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
         if get_variograms:
             variograms = dict()
 
-        if not write_csv:
+        if not write_csv and not tuning:
             out_fl = Path(out_dir, "scens_{}.p.gz".format(date_lbl))
 
             if skip_existing and out_fl.exists():
@@ -110,7 +110,7 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
 
             out_scens = dict()
 
-        if write_csv and skip_existing:
+        if write_csv and skip_existing and not tuning:
             date_path = Path(out_dir, scenario_start_time.strftime('%Y%m%d'))
 
             if ((create_load or create_load_solar)
@@ -172,19 +172,19 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
                 energy_scores['Load'] = compute_energy_scores(
                     load_engn.scenarios['load'],
                     load_zone_actual_df, load_zone_forecast_df
-                    )
+                )
 
             if get_variograms:
                 variograms['Load'] = compute_variograms(
                     load_engn.scenarios['load'],
                     load_zone_actual_df, load_zone_forecast_df
-                    )
-
-            if write_csv:
-                load_engn.write_to_csv(out_dir, load_zone_actual_futures,
-                                       write_forecasts=True)
-            else:
-                out_scens['Load'] = load_engn.scenarios['load'].round(4)
+                )
+            if not tuning:
+                if write_csv:
+                    load_engn.write_to_csv(out_dir, load_zone_actual_futures,
+                                           write_forecasts=True)
+                else:
+                    out_scens['Load'] = load_engn.scenarios['load'].round(4)
 
         if create_wind:
             dist = wind_engn.asset_distance().values
@@ -196,19 +196,20 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
                 energy_scores['Wind'] = compute_energy_scores(
                     wind_engn.scenarios['wind'],
                     wind_site_actual_df, wind_site_forecast_df
-                    )
+                )
 
             if get_variograms:
                 variograms['Wind'] = compute_variograms(
                     wind_engn.scenarios['wind'],
                     wind_site_actual_df, wind_site_forecast_df
-                    )
+                )
 
-            if write_csv:
-                wind_engn.write_to_csv(out_dir, wind_site_actual_futures,
-                                       write_forecasts=True)
-            else:
-                out_scens['Wind'] = wind_engn.scenarios['wind'].round(4)
+            if not tuning:
+                if write_csv:
+                    wind_engn.write_to_csv(out_dir, wind_site_actual_futures,
+                                           write_forecasts=True)
+                else:
+                    out_scens['Wind'] = wind_engn.scenarios['wind'].round(4)
 
         if create_solar:
             solar_engn.fit_solar_model(nearest_days=nearest_days)
@@ -219,20 +220,20 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
                 energy_scores['Solar'] = compute_energy_scores(
                     solar_engn.scenarios['solar'],
                     solar_site_actual_df, solar_site_forecast_df
-                    )
+                )
 
             if get_variograms:
                 variograms['Solar'] = compute_variograms(
                     solar_engn.scenarios['solar'],
                     solar_site_actual_df, solar_site_forecast_df
-                    )
-
-            if write_csv:
-                solar_engn.write_to_csv(out_dir,
-                                        {'solar': solar_site_actual_futures},
-                                        write_forecasts=True)
-            else:
-                out_scens['Solar'] = solar_engn.scenarios['solar'].round(4)
+                )
+            if not tuning:
+                if write_csv:
+                    solar_engn.write_to_csv(out_dir,
+                                            {'solar': solar_site_actual_futures},
+                                            write_forecasts=True)
+                else:
+                    out_scens['Solar'] = solar_engn.scenarios['solar'].round(4)
 
         if create_load_solar:
             solar_engn.fit_load_solar_joint_model(
@@ -259,34 +260,35 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
                 variograms['Load'] = compute_variograms(
                     solar_engn.scenarios['load'],
                     load_zone_actual_df, load_zone_forecast_df
-                    )
+                )
                 variograms['Solar'] = compute_variograms(
                     solar_engn.scenarios['solar'],
                     solar_site_actual_df, solar_site_forecast_df
-                    )
+                )
 
-            if write_csv:
-                solar_engn.write_to_csv(out_dir,
-                                        {'load': load_zone_actual_futures,
-                                         'solar': solar_site_actual_futures},
-                                        write_forecasts=True)
-            else:
-                out_scens['Load'] = solar_engn.scenarios['load'].round(4)
-                out_scens['Solar'] = solar_engn.scenarios['solar'].round(4)
+            if not tuning:
+                if write_csv:
+                    solar_engn.write_to_csv(out_dir,
+                                            {'load': load_zone_actual_futures,
+                                             'solar': solar_site_actual_futures},
+                                            write_forecasts=True)
+                else:
+                    out_scens['Load'] = solar_engn.scenarios['load'].round(4)
+                    out_scens['Solar'] = solar_engn.scenarios['solar'].round(4)
 
-        if not write_csv:
+        if not write_csv and not tuning:
             with bz2.BZ2File(out_fl, 'w') as f:
                 pickle.dump(out_scens, f, protocol=-1)
 
         if get_energy_scores:
             with bz2.BZ2File(Path(out_fl.parent,
-                                  'escores_{}.p.gz'.format(date_lbl)),
+                                  'escores_{}_{}_{}.p.gz'.format(date_lbl, asset_rho, time_rho)),
                              'w') as f:
                 pickle.dump(energy_scores, f, protocol=-1)
 
         if get_variograms:
             with bz2.BZ2File(Path(out_fl.parent,
-                                  'varios_{}.p.gz'.format(date_lbl)),
+                                  'varios_{}_{}_{}.p.gz'.format(date_lbl, asset_rho, time_rho)),
                              'w') as f:
                 pickle.dump(variograms, f, protocol=-1)
 
