@@ -95,7 +95,7 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
                                        periods=24, freq='H')
 
         if verbosity >= 1:
-            print("Creating RTS-GMLC scenarios for: {}".format(date_lbl))
+            print("Creating RTS-GMLC scenarios for: {} with {} {}".format(date_lbl, asset_rho, time_rho))
 
         if get_energy_scores:
             energy_scores = dict()
@@ -103,7 +103,7 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
             variograms = dict()
 
         if not write_csv and not tuning:
-            out_fl = Path(out_dir, "scens_{}.p.gz".format(date_lbl))
+            out_fl = Path(out_dir, "scens_{}_{}_{}.p.gz".format(date_lbl, asset_rho, time_rho))
 
             if skip_existing and out_fl.exists():
                 continue
@@ -281,13 +281,13 @@ def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
                 pickle.dump(out_scens, f, protocol=-1)
 
         if get_energy_scores:
-            with bz2.BZ2File(Path(out_fl.parent,
+            with bz2.BZ2File(Path(out_dir,
                                   'escores_{}_{}_{}.p.gz'.format(date_lbl, asset_rho, time_rho)),
                              'w') as f:
                 pickle.dump(energy_scores, f, protocol=-1)
 
         if get_variograms:
-            with bz2.BZ2File(Path(out_fl.parent,
+            with bz2.BZ2File(Path(out_dir,
                                   'varios_{}_{}_{}.p.gz'.format(date_lbl, asset_rho, time_rho)),
                              'w') as f:
                 pickle.dump(variograms, f, protocol=-1)

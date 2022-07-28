@@ -24,12 +24,7 @@ from ..utils.data_utils import (split_actuals_hist_future,
 rts_pca_parser = argparse.ArgumentParser(add_help=False, parents=[pca_parser])
 rts_pca_parser.add_argument('rts_dir', type=str,
                             help="where RTS-GMLC repository is stored")
-rts_pca_parser.add_argument('--tuning', '-t', action='store_true',
-                            dest='tuning', help="implement tuning to output scores")
-rts_pca_parser.add_argument('--asset-rho-list', action="extend", nargs="+", type=int,
-                            dest='asset_rho_list', help='the list of asset rho values for tuning')
-rts_pca_parser.add_argument('--time-rho-list', action="extend", nargs="+", type=int,
-                            dest='time_rho_list', help='the list of time rho values for tuning')
+
 
 joint_parser = argparse.ArgumentParser(parents=[rts_pca_parser],
                                        add_help=False)
@@ -44,7 +39,7 @@ def run_solar() -> None:
     args = argparse.ArgumentParser(
         'pgscen-rts-pca-solar', parents=[rts_pca_parser],
         description="Create day ahead RTS solar scenarios using PCA features."
-        ).parse_args()
+    ).parse_args()
 
     rts_pca_runner(args.start, args.days, args.rts_dir, args.out_dir,
                    args.scenario_count, args.components, args.nearest_days,
@@ -59,7 +54,7 @@ def run_load_solar() -> None:
     args = argparse.ArgumentParser(
         'pgscen-rts-pca-load-solar', parents=[joint_parser],
         description="Create day ahead RTS load-solar joint-modeled scenarios."
-        ).parse_args()
+    ).parse_args()
 
     rts_pca_runner(args.start, args.days, args.rts_dir, args.out_dir,
                    args.scenario_count, args.components, args.nearest_days,
@@ -80,125 +75,135 @@ def run_rts_pca() -> None:
 
     parser.add_argument('--joint', action='store_true',
                         help="use a joint load-solar model")
+
+    parser.add_argument('--tuning', '-t', action='store_true',
+                        dest='tuning', help="implement tuning to output scores")
+    parser.add_argument('--asset-rho-list', action="extend", nargs="+", type=float,
+                        dest='asset_rho_list', help='the list of asset rho values for tuning')
+    parser.add_argument('--time-rho-list', action="extend", nargs="+", type=float,
+                        dest='time_rho_list', help='the list of time rho values for tuning')
+    parser.add_argument('--component-list', action="extend", nargs="+", type=float,
+                        dest='component_list', help='the list of pca component values for tuning')
     args = parser.parse_args()
 
-    if args.tuning:
+    if not args.tuning:
+        run_rts_pca_oneturn(args.start, args.days, args.rts_dir, args.out_dir,
+                            args.scenario_count, args.components, args.nearest_days,
+                            args.asset_rho, args.time_rho, args.random_seed, not args.joint, args.joint,
+                            not args.pickle, args.skip_existing, args.energy_scores,
+                            args.use_all_load_hist,
+                            args.variograms, args.tuning, args.verbose)
+    else:
         for asset_rho in args.asset_rho_list:
             for time_rho in args.time_rho_list:
-                rts_runner(args.start, args.days, args.rts_dir, args.out_dir,
-                           args.scenario_count, args.nearest_days, asset_rho,
-                           time_rho, args.random_seed, create_load=not args.joint,
-                           create_wind=True, write_csv=not args.pickle,
-                           skip_existing=args.skip_existing,
-                           get_energy_scores=args.energy_scores,
-                           get_variograms=args.variograms, tuning=args.tuning, verbosity=args.verbose)
-    else:
-        rts_runner(args.start, args.days, args.rts_dir, args.out_dir,
-                   args.scenario_count, args.nearest_days, args.asset_rho,
-                   args.time_rho, args.random_seed, create_load=not args.joint,
-                   create_wind=True, write_csv=not args.pickle,
-                   skip_existing=args.skip_existing,
-                   get_energy_scores=args.energy_scores,
-                   get_variograms=args.variograms, tuning=args.tuning, verbosity=args.verbose)
+                run_rts_pca_oneturn(args.start, args.days, args.rts_dir, args.out_dir,
+                                    args.scenario_count, args.components, args.nearest_days,
+                                    asset_rho, time_rho, args.random_seed, not args.joint, args.joint,
+                                    not args.pickle, args.skip_existing, args.energy_scores,
+                                    args.use_all_load_hist,
+                                    args.variograms, args.tuning, args.verbose)
+
+
+def run_rts_pca_oneturn(start, days, rts_dir, out_dir,
+                        scenario_count, components, nearest_days,
+                        asset_rho, time_rho, random_seed, create_load, create_load_solar,
+                        write_csv,
+                        skip_existing,
+                        energy_scores, use_all_load_hist,
+                        variograms, tuning, verbose) -> None:
+    rts_runner(start, days, rts_dir, out_dir,
+               scenario_count, nearest_days, asset_rho,
+               time_rho, random_seed, create_load,
+               create_wind=True, write_csv=write_csv,
+               skip_existing=skip_existing,
+               get_energy_scores=energy_scores,
+               get_variograms=variograms, tuning=tuning, verbosity=verbose)
 
     # to avoid output files from the non-PCA scenarios from being overwritten,
     # we move them to a temporary directory before creating PCA scenarios
-    if args.pickle & args.tuning:
-        os.makedirs(str(Path(args.out_dir, 'tmp')), exist_ok=True)
+    if not tuning:
+        if pickle:
+            os.makedirs(str(Path(out_dir, 'tmp')), exist_ok=True)
 
-        scen_lbls = ["scens_{}.p.gz".format(start_time.strftime('%Y-%m-%d'))
-                     for start_time in pd.date_range(start=args.start,
-                                                     periods=args.days,
-                                                     freq='D', tz='utc')]
+            scen_lbls = ["scens_{}_{}_{}.p.gz".format(start_time.strftime('%Y-%m-%d'), asset_rho, time_rho)
+                         for start_time in pd.date_range(start=start,
+                                                         periods=days,
+                                                         freq='D', tz='utc')]
 
-        for scen_lbl in scen_lbls:
-            os.rename(str(Path(args.out_dir, scen_lbl)),
-                      str(Path(args.out_dir, 'tmp', scen_lbl)))
+            for scen_lbl in scen_lbls:
+                os.rename(str(Path(out_dir, scen_lbl)),
+                          str(Path(out_dir, 'tmp', scen_lbl)))
 
-    if args.energy_scores:
-        os.makedirs(str(Path(args.out_dir, 'tmp')), exist_ok=True)
+    if energy_scores:
+        os.makedirs(str(Path(out_dir, 'tmp')), exist_ok=True)
 
-        escr_lbls = ["escores_{}.p.gz".format(start_time.strftime('%Y-%m-%d'))
-                     for start_time in pd.date_range(start=args.start,
-                                                     periods=args.days,
+        escr_lbls = ["escores_{}_{}_{}.p.gz".format(start_time.strftime('%Y-%m-%d'), asset_rho, time_rho)
+                     for start_time in pd.date_range(start=start,
+                                                     periods=days,
                                                      freq='D', tz='utc')]
 
         for escr_lbl in escr_lbls:
-            os.rename(str(Path(args.out_dir, escr_lbl)),
-                      str(Path(args.out_dir, 'tmp', escr_lbl)))
+            os.rename(str(Path(out_dir, escr_lbl)),
+                      str(Path(out_dir, 'tmp', escr_lbl)))
 
-    if args.variograms:
-        os.makedirs(str(Path(args.out_dir, 'tmp')), exist_ok=True)
+    if variograms:
+        os.makedirs(str(Path(out_dir, 'tmp')), exist_ok=True)
 
-        vrgm_lbls = ["varios_{}.p.gz".format(start_time.strftime('%Y-%m-%d'))
-                     for start_time in pd.date_range(start=args.start,
-                                                     periods=args.days,
+        vrgm_lbls = ["varios_{}_{}_{}.p.gz".format(start_time.strftime('%Y-%m-%d'), asset_rho, time_rho)
+                     for start_time in pd.date_range(start=start,
+                                                     periods=days,
                                                      freq='D', tz='utc')]
 
         for vrgm_lbl in vrgm_lbls:
-            os.rename(str(Path(args.out_dir, vrgm_lbl)),
-                      str(Path(args.out_dir, 'tmp', vrgm_lbl)))
+            os.rename(str(Path(out_dir, vrgm_lbl)),
+                      str(Path(out_dir, 'tmp', vrgm_lbl)))
 
-    if args.tuning:
-        for asset_rho in args.asset_rho_list:
-            for time_rho in args.time_rho_list:
-                rts_pca_runner(args.start, args.days, args.rts_dir, args.out_dir,
-                               args.scenario_count, args.components, args.nearest_days,
-                               asset_rho, time_rho, args.random_seed,
-                               create_load_solar=args.joint, write_csv=not args.pickle,
-                               skip_existing=args.skip_existing,
-                               get_energy_scores=args.energy_scores,
-                               get_variograms=args.variograms,
-                               use_all_load_hist=args.use_all_load_hist,
-                               verbosity=args.verbose)
-    else:
-        rts_pca_runner(args.start, args.days, args.rts_dir, args.out_dir,
-                       args.scenario_count, args.components, args.nearest_days,
-                       args.asset_rho, args.time_rho, args.random_seed,
-                       create_load_solar=args.joint, write_csv=not args.pickle,
-                       skip_existing=args.skip_existing,
-                       get_energy_scores=args.energy_scores,
-                       get_variograms=args.variograms,
-                       use_all_load_hist=args.use_all_load_hist,
-                       verbosity=args.verbose)
+    rts_pca_runner(start, days, rts_dir, out_dir,
+                   scenario_count, components, nearest_days,
+                   asset_rho, time_rho, random_seed,
+                   create_load_solar=create_load_solar, write_csv=write_csv,
+                   skip_existing=skip_existing,
+                   get_energy_scores=energy_scores,
+                   get_variograms=variograms,
+                   tuning=tuning, use_all_load_hist=use_all_load_hist,
+                   verbosity=verbose)
 
     # to create the final output files we merge the PCA and the non-PCA outputs
-    if args.pickle & args.tuning:
-        for scen_lbl in scen_lbls:
-            with bz2.BZ2File(Path(args.out_dir, scen_lbl), 'r') as f:
-                pca_scens = pickle.load(f)
-            with bz2.BZ2File(Path(args.out_dir, 'tmp', scen_lbl), 'r') as f:
-                pca_scens.update(pickle.load(f))
+    if not tuning:
+        if pickle:
+            for scen_lbl in scen_lbls:
+                with bz2.BZ2File(Path(out_dir, scen_lbl), 'r') as f:
+                    pca_scens = pickle.load(f)
+                with bz2.BZ2File(Path(out_dir, 'tmp', scen_lbl), 'r') as f:
+                    pca_scens.update(pickle.load(f))
 
-            os.remove(Path(args.out_dir, 'tmp', scen_lbl))
-            with bz2.BZ2File(Path(args.out_dir, scen_lbl), 'w') as f:
-                pickle.dump(pca_scens, f, protocol=-1)
+                os.remove(Path(out_dir, 'tmp', scen_lbl))
+                with bz2.BZ2File(Path(out_dir, scen_lbl), 'w') as f:
+                    pickle.dump(pca_scens, f, protocol=-1)
 
-    if args.energy_scores:
+    if energy_scores:
         for escr_lbl in escr_lbls:
-            with bz2.BZ2File(Path(args.out_dir, escr_lbl), 'r') as f:
+            with bz2.BZ2File(Path(out_dir, escr_lbl), 'r') as f:
                 pca_scens = pickle.load(f)
-            with bz2.BZ2File(Path(args.out_dir, 'tmp', escr_lbl), 'r') as f:
+            with bz2.BZ2File(Path(out_dir, 'tmp', escr_lbl), 'r') as f:
                 pca_scens.update(pickle.load(f))
 
-            os.remove(Path(args.out_dir, 'tmp', escr_lbl))
-            with bz2.BZ2File(Path(args.out_dir, escr_lbl), 'w') as f:
+            os.remove(Path(out_dir, 'tmp', escr_lbl))
+            with bz2.BZ2File(Path(out_dir, escr_lbl), 'w') as f:
                 pickle.dump(pca_scens, f, protocol=-1)
 
-    if args.variograms:
+    if variograms:
         for vrgm_lbl in vrgm_lbls:
-            with bz2.BZ2File(Path(args.out_dir, vrgm_lbl), 'r') as f:
+            with bz2.BZ2File(Path(out_dir, vrgm_lbl), 'r') as f:
                 pca_scens = pickle.load(f)
-            with bz2.BZ2File(Path(args.out_dir, 'tmp', vrgm_lbl), 'r') as f:
+            with bz2.BZ2File(Path(out_dir, 'tmp', vrgm_lbl), 'r') as f:
                 pca_scens.update(pickle.load(f))
 
-            os.remove(Path(args.out_dir, 'tmp', vrgm_lbl))
-            with bz2.BZ2File(Path(args.out_dir, vrgm_lbl), 'w') as f:
+            os.remove(Path(out_dir, 'tmp', vrgm_lbl))
+            with bz2.BZ2File(Path(out_dir, vrgm_lbl), 'w') as f:
                 pickle.dump(pca_scens, f, protocol=-1)
 
 
-
-#TODO: lot of overlap here with the t7k PCA runner
 def rts_pca_runner(start_date: str, ndays: int, rts_dir: str, out_dir: str,
                    scen_count: int, components: str,
                    nearest_days: Union[int, None], asset_rho: float,
@@ -220,7 +225,7 @@ def rts_pca_runner(start_date: str, ndays: int, rts_dir: str, out_dir: str,
 
     # load input datasets, starting with solar farm data
     (solar_site_actual_df, solar_site_forecast_df,
-        solar_meta_df) = load_solar_data(rts_dir)
+     solar_meta_df) = load_solar_data(rts_dir)
 
     if create_load_solar:
         load_zone_actual_df, load_zone_forecast_df = loadata(rts_dir)
@@ -231,7 +236,7 @@ def rts_pca_runner(start_date: str, ndays: int, rts_dir: str, out_dir: str,
     # create scenarios for each requested day
     for scenario_start_time in pd.date_range(start=start, periods=ndays,
                                              freq='D', tz='utc'):
-        date_lbl = scenario_start_time.strft_load_dime('%Y-%m-%d')
+        date_lbl = scenario_start_time.strftime('%Y-%m-%d')
 
         scen_timesteps = pd.date_range(start=scenario_start_time,
                                        periods=24, freq='H')
@@ -248,7 +253,7 @@ def rts_pca_runner(start_date: str, ndays: int, rts_dir: str, out_dir: str,
         # in this output directory
         if not tuning:
             if not write_csv:
-                out_fl = Path(out_dir, "scens.p.gz".format(date_lbl))
+                out_fl = Path(out_dir, "scens_{}_{}_{}.p.gz".format(date_lbl, asset_rho, time_rho))
 
                 if skip_existing and out_fl.exists():
                     continue
@@ -266,20 +271,20 @@ def rts_pca_runner(start_date: str, ndays: int, rts_dir: str, out_dir: str,
 
         # split input datasets into training and testing subsets
         (solar_site_actual_hists,
-            solar_site_actual_futures) = split_actuals_hist_future(
-                solar_site_actual_df, scen_timesteps, in_sample=True)
+         solar_site_actual_futures) = split_actuals_hist_future(
+            solar_site_actual_df, scen_timesteps, in_sample=True)
         (solar_site_forecast_hists,
-            solar_site_forecast_futures) = split_forecasts_hist_future(
-                solar_site_forecast_df, scen_timesteps, in_sample=True)
+         solar_site_forecast_futures) = split_forecasts_hist_future(
+            solar_site_forecast_df, scen_timesteps, in_sample=True)
 
         if create_load_solar:
             (load_zone_actual_hists,
-                load_zone_actual_futures) = split_actuals_hist_future(
-                    load_zone_actual_df, scen_timesteps, in_sample=True)
+             load_zone_actual_futures) = split_actuals_hist_future(
+                load_zone_actual_df, scen_timesteps, in_sample=True)
 
             (load_zone_forecast_hists,
-                load_zone_forecast_futures) = split_forecasts_hist_future(
-                    load_zone_forecast_df, scen_timesteps, in_sample=True)
+             load_zone_forecast_futures) = split_forecasts_hist_future(
+                load_zone_forecast_df, scen_timesteps, in_sample=True)
 
         solar_engn = PCAGeminiEngine(solar_site_actual_hists,
                                      solar_site_forecast_hists,
@@ -294,22 +299,22 @@ def rts_pca_runner(start_date: str, ndays: int, rts_dir: str, out_dir: str,
                 asset_rho=dist / (10 * dist.max()), pca_comp_rho=5e-2,
                 num_of_components=components, nearest_days=nearest_days,
                 use_all_load_hist=use_all_load_hist
-                )
+            )
 
             solar_engn.create_load_solar_joint_scenario(
                 scen_count,
                 load_zone_forecast_futures, solar_site_forecast_futures
-                )
+            )
 
             if get_energy_scores:
                 energy_scores['Load'] = compute_energy_scores(
                     solar_engn.scenarios['load'],
                     load_zone_actual_df, load_zone_forecast_df
-                    )
+                )
                 energy_scores['Solar'] = compute_energy_scores(
                     solar_engn.scenarios['solar'],
                     solar_site_actual_df, solar_site_forecast_df
-                    )
+                )
 
             if get_variograms:
                 variograms['Load'] = compute_variograms(
@@ -370,13 +375,13 @@ def rts_pca_runner(start_date: str, ndays: int, rts_dir: str, out_dir: str,
                 pickle.dump(out_scens, f, protocol=-1)
 
         if get_energy_scores:
-            with bz2.BZ2File(Path(out_fl.parent,
+            with bz2.BZ2File(Path(out_dir,
                                   'escores_{}_{}_{}.p.gz'.format(date_lbl, asset_rho, time_rho)),
                              'w') as f:
                 pickle.dump(energy_scores, f, protocol=-1)
 
         if get_variograms:
-            with bz2.BZ2File(Path(out_fl.parent,
+            with bz2.BZ2File(Path(out_dir,
                                   'varios_{}_{}_{}.p.gz'.format(date_lbl, asset_rho, time_rho)),
                              'w') as f:
                 pickle.dump(variograms, f, protocol=-1)
