@@ -96,7 +96,9 @@ def run_rts_pca() -> None:
     else:
         for asset_rho in args.asset_rho_list:
             for time_rho in args.time_rho_list:
-                run_rts_pca_oneturn(args.start, args.days, args.rts_dir, args.out_dir,
+                out_dir_sub = os.path.join(args.out_dir, str(asset_rho) + '_' + str(time_rho))
+                os.mkdir(out_dir_sub)
+                run_rts_pca_oneturn(args.start, args.days, args.rts_dir, out_dir_sub,
                                     args.scenario_count, args.components, args.nearest_days,
                                     asset_rho, time_rho, args.random_seed, not args.joint, args.joint,
                                     not args.pickle, args.skip_existing, args.energy_scores,
