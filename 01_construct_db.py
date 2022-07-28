@@ -10,13 +10,13 @@ from joblib import Parallel, delayed
 
 # Command Line Usage Examples
 # python3 01_construct_db.py '/scratch/gpfs/jf3375/data/scenario_data/v0.4.1-20k'
-# '/scratch/gpfs/jf3375/output/scenario_data/v0.4.1-20k' 'Scenario' —energy_type 'Wind'
+# '/scratch/gpfs/jf3375/output/scenario_data/v0.4.1-20k' 'Scenario' --energy_type 'Wind'
 #
 # python3 01_construct_db.py '/scratch/gpfs/jf3375/data/scenario_data/v0.4.1-20k'
-# '/scratch/gpfs/jf3375/output/scenario_data/v0.4.1-20k' 'Scenario' —energy_type 'Load'
+# '/scratch/gpfs/jf3375/output/scenario_data/v0.4.1-20k' 'Scenario' --energy_type 'Load'
 #
 # python3 01_construct_db.py '/scratch/gpfs/jf3375/data/scenario_data/v0.4.1-20k'
-# '/scratch/gpfs/jf3375/output/scenario_data/v0.4.1-20k' 'Scenario' —energy_type 'Solar'
+# '/scratch/gpfs/jf3375/output/scenario_data/v0.4.1-20k' 'Scenario' --energy_type 'Solar'
 #
 # python3 01_construct_db.py '/scratch/gpfs/jf3375/data/scenario_data/v0.4.1-20k'
 # '/scratch/gpfs/jf3375/output/score_data/v0.4.1-20k' 'Scores'
@@ -33,15 +33,18 @@ def main():
     parser.add_argument("data_type", type=str, choices=['Scores', 'Scenario'], default='Scenario',
                         help="extract the data type")
 
-    parser.add_argument("-energy_type", type=str, choices=['Wind', 'Load', 'Solar'],
+    parser.add_argument("--energy_type", type=str, choices=['Wind', 'Load', 'Solar'],
                         help="extract the energy type; extract scores data will be for all energy types")
+
+    parser.add_argument("--output_file_ending_string", type=str, default='', dest='output_ending_str',
+                        help="the output ending string to customie file name")
 
     args = parser.parse_args()
 
     if args.data_type == 'Scenario':
-        merge_output_scenarios_files_daily(args.inp_dir, args.out_dir, args.energy_type)
+        merge_output_scenarios_files_daily(args.inp_dir, args.out_dir, args.energy_type, args.output_ending_str)
     else:
-        merge_output_scores_files(args.inp_dir, args.out_dir)
+        merge_output_scores_files(args.inp_dir, args.out_dir, args.output_ending_str)
 
 
 def extract_daily_file(file, energy_type, input_dir, drop_index=True):
@@ -103,7 +106,7 @@ def merge_output_scenarios_files_quarterly(input_dir, output_dir, n_jobs=30):
             delayed(output_file)(file, file_name, output_dir) for file, file_name in zip(outputs_list, files_name_list))
 
 
-def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, n_jobs=31):
+def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, output_ending_str, n_jobs=31):
     # initialize output dataframes
 
     os.chdir(input_dir)
@@ -116,7 +119,7 @@ def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, n_job
         if end_file_idx > len(files_list):
             end_file_idx = len(files_list)
 
-        files_name_list = ['scenario' + '_' + energy_type.lower() + '_' + i[6:16]
+        files_name_list = ['scenario' + '_' + energy_type.lower() + '_' + i[6:16] + output_ending_str
                            for i in files_list[start_file_idx:end_file_idx]]
 
         panel_df_list = Parallel(n_jobs, verbose=-1)(
@@ -128,7 +131,7 @@ def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, n_job
             zip(panel_df_list, files_name_list))
 
 
-def merge_output_scores_files(input_dir, output_dir):
+def merge_output_scores_files(input_dir, output_dir, output_ending_str):
     os.chdir(input_dir)
 
     # list input fuiles
@@ -161,7 +164,8 @@ def merge_output_scores_files(input_dir, output_dir):
         for energy_type, df in df_energy_types.items():
             if df.shape[0] != 0:
                 df = df.reset_index().rename(columns={'index': energy_type.lower()}).sort_values([energy_type.lower()])
-                df.to_csv(scores + '_' + energy_type.lower() + '_2020' + '.csv.gz', index=False, compression='gzip')
+                df.to_csv(scores + '_' + energy_type.lower() + '_2020' + output_ending_str + '.csv.gz', index=False,
+                          compression='gzip')
 
 
 if __name__ == '__main__':
