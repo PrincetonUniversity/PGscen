@@ -21,10 +21,11 @@ from .data_utils import load_load_data, load_solar_data
 from ..utils.data_utils import (split_actuals_hist_future,
                                 split_forecasts_hist_future)
 
+from joblib import Parallel, delayed
+
 rts_pca_parser = argparse.ArgumentParser(add_help=False, parents=[pca_parser])
 rts_pca_parser.add_argument('rts_dir', type=str,
                             help="where RTS-GMLC repository is stored")
-
 
 joint_parser = argparse.ArgumentParser(parents=[rts_pca_parser],
                                        add_help=False)
@@ -94,16 +95,14 @@ def run_rts_pca() -> None:
                             args.use_all_load_hist,
                             args.variograms, args.tuning, args.verbose)
     else:
-        for asset_rho in args.asset_rho_list:
-            for time_rho in args.time_rho_list:
-                out_dir_sub = os.path.join(args.out_dir, str(asset_rho) + '_' + str(time_rho))
-                os.mkdir(out_dir_sub)
-                run_rts_pca_oneturn(args.start, args.days, args.rts_dir, out_dir_sub,
-                                    args.scenario_count, args.components, args.nearest_days,
-                                    asset_rho, time_rho, args.random_seed, not args.joint, args.joint,
-                                    not args.pickle, args.skip_existing, args.energy_scores,
-                                    args.use_all_load_hist,
-                                    args.variograms, args.tuning, args.verbose)
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(run_rts_pca_oneturn)(args.start, args.days, args.rts_dir, args.out_dir,
+                                         args.scenario_count, args.components, args.nearest_days,
+                                         asset_rho, time_rho, args.random_seed, not args.joint, args.joint,
+                                         not args.pickle, args.skip_existing, args.energy_scores,
+                                         args.use_all_load_hist,
+                                         args.variograms, args.tuning, args.verbose) for asset_rho in
+            args.asset_rho_list for time_rho in args.time_rho_list)
 
 
 def run_rts_pca_oneturn(start, days, rts_dir, out_dir,
@@ -113,6 +112,11 @@ def run_rts_pca_oneturn(start, days, rts_dir, out_dir,
                         skip_existing,
                         energy_scores, use_all_load_hist,
                         variograms, tuning, verbose) -> None:
+    if tuning:
+        out_dir = os.path.join(out_dir, str(asset_rho) + '_' + str(time_rho))
+        if not os.path.isdir(out_dir):
+            os.mkdir(out_dir)
+
     rts_runner(start, days, rts_dir, out_dir,
                scenario_count, nearest_days, asset_rho,
                time_rho, random_seed, create_load,
