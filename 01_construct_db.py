@@ -36,15 +36,29 @@ def main():
     parser.add_argument("--energy_type", type=str, choices=['Wind', 'Load', 'Solar'],
                         help="extract the energy type; extract scores data will be for all energy types")
 
-    parser.add_argument("--output_file_ending_string", type=str, default='', dest='output_ending_str',
-                        help="the output ending string to customie file name")
+    parser.add_argument('--asset-rho-list', action="extend", nargs="+", type=float,
+                        dest='asset_rho_list', help='the list of asset rho values for tuning')
+
+    parser.add_argument('--time-rho-list', action="extend", nargs="+", type=float,
+                        dest='time_rho_list', help='the list of time rho values for tuning')
 
     args = parser.parse_args()
 
-    if args.data_type == 'Scenario':
-        merge_output_scenarios_files_daily(args.inp_dir, args.out_dir, args.energy_type, args.output_ending_str)
+    if not args.asset_rho_list:
+        if args.data_type == 'Scenario':
+            merge_output_scenarios_files_daily(args.inp_dir, args.out_dir, args.energy_type)
+        else:
+            merge_output_scores_files(args.inp_dir, args.out_dir)
     else:
-        merge_output_scores_files(args.inp_dir, args.out_dir, args.output_ending_str)
+        if args.data_type == 'Scenario':
+            Parallel(n_jobs=31, verbose=-1)(
+                delayed(merge_output_scenarios_files_daily)(args.inp_dir, args.out_dir, args.energy_type, asset_rho,
+                                                            time_rho) for asset_rho in
+                args.asset_rho_list for time_rho in args.time_rho_list)
+        else:
+            Parallel(n_jobs=31, verbose=-1)(
+                delayed(merge_output_scores_files)(args.inp_dir, args.out_dir, asset_rho, time_rho) for asset_rho in
+                args.asset_rho_list for time_rho in args.time_rho_list)
 
 
 def extract_daily_file(file, energy_type, input_dir, drop_index=True):
@@ -106,8 +120,14 @@ def merge_output_scenarios_files_quarterly(input_dir, output_dir, n_jobs=30):
             delayed(output_file)(file, file_name, output_dir) for file, file_name in zip(outputs_list, files_name_list))
 
 
-def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, output_ending_str, n_jobs=31):
+def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, asset_rho=None, time_rho=None, n_jobs=31):
     # initialize output dataframes
+    if asset_rho:
+        ending_str = str(asset_rho) + '_' + str(time_rho)
+    else:
+        ending_str = ''
+
+    input_dir = os.path.join(input_dir, ending_str)
 
     os.chdir(input_dir)
     files_list = sorted([i for i in os.listdir(input_dir) if i[0:5] == 'scens'])
@@ -119,7 +139,7 @@ def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, outpu
         if end_file_idx > len(files_list):
             end_file_idx = len(files_list)
 
-        files_name_list = ['scenario' + '_' + energy_type.lower() + '_' + i[6:16] + output_ending_str
+        files_name_list = ['scenario' + '_' + energy_type.lower() + '_' + i[6:16] + ending_str
                            for i in files_list[start_file_idx:end_file_idx]]
 
         panel_df_list = Parallel(n_jobs, verbose=-1)(
@@ -131,7 +151,14 @@ def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, outpu
             zip(panel_df_list, files_name_list))
 
 
-def merge_output_scores_files(input_dir, output_dir, output_ending_str):
+def merge_output_scores_files(input_dir, output_dir, asset_rho=None, time_rho=None):
+    if asset_rho:
+        ending_str = str(asset_rho) + '_' + str(time_rho)
+    else:
+        ending_str = ''
+
+    input_dir = os.path.join(input_dir, ending_str)
+
     os.chdir(input_dir)
 
     # list input fuiles
@@ -164,7 +191,7 @@ def merge_output_scores_files(input_dir, output_dir, output_ending_str):
         for energy_type, df in df_energy_types.items():
             if df.shape[0] != 0:
                 df = df.reset_index().rename(columns={'index': energy_type.lower()}).sort_values([energy_type.lower()])
-                df.to_csv(scores + '_' + energy_type.lower() + '_2020' + output_ending_str + '.csv.gz', index=False,
+                df.to_csv(scores + '_' + energy_type.lower() + '_2020_' + ending_str + '.csv.gz', index=False,
                           compression='gzip')
 
 
