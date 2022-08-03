@@ -36,11 +36,12 @@ setuptools.setup(
 
             'pgscen-rts=pgscen.rts_gmlc.command_line:run_rts',
             'pgscen-rts-joint=pgscen.rts_gmlc.command_line:run_rts_joint',
+            'pgscen-rts-solar=pgscen.rts_gmlc.command_line:run_rts_solar',
             'pgscen-rts-pca-solar=pgscen.rts_gmlc.pca_command_line:run_solar',
             'pgscen-rts-pca-load-solar'
             '=pgscen.rts_gmlc.pca_command_line:run_load_solar',
             'pgscen-rts-pca=pgscen.rts_gmlc.pca_command_line:run_rts_pca',
-            ],
+        ],
         },
 
     install_requires=['numpy', 'matplotlib', 'pandas', 'scipy'],

@@ -46,6 +46,19 @@ def run_rts():
                get_energy_scores=args.energy_scores,
                get_variograms=args.variograms, verbosity=args.verbose)
 
+def run_rts_solar():
+    args = argparse.ArgumentParser(
+        'pgscen-rts-solar', parents=[rts_parser],
+        description="Create day-ahead RTS solar scenarios."
+    ).parse_args()
+
+    rts_runner(args.start, args.days, args.rts_dir, args.out_dir,
+               args.scenario_count, args.nearest_days, args.asset_rho,
+               args.time_rho, args.random_seed, create_load=False,
+               create_wind=False, create_solar=True, write_csv=not args.pickle,
+               skip_existing=args.skip_existing,
+               get_energy_scores=args.energy_scores,
+               get_variograms=args.variograms, verbosity=args.verbose)
 
 def run_rts_joint():
     args = argparse.ArgumentParser(
