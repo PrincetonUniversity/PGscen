@@ -24,15 +24,17 @@ setuptools.setup(
 
     entry_points={
         'console_scripts': [
-            'pgscen-load=pgscen.command_line:run_load',
-            'pgscen-wind=pgscen.command_line:run_wind',
-            'pgscen-solar=pgscen.command_line:run_solar',
-            'pgscen-load-solar=pgscen.command_line:run_load_solar_joint',
-            'pgscen=pgscen.command_line:run_t7k',
+            'pgscen-load=pgscen.command_line:create_load_scenarios',
+            'pgscen-wind=pgscen.command_line:create_wind_scenarios',
+            'pgscen-solar=pgscen.command_line:create_solar_scenarios',
+            'pgscen-load-solar'
+            '=pgscen.command_line:create_load_solar_scenarios',
+            'pgscen=pgscen.command_line:create_scenarios',
 
-            'pgscen-pca-solar=pgscen.pca_command_line:run_solar',
-            'pgscen-pca-load-solar=pgscen.pca_command_line:run_load_solar',
-            'pgscen-pca=pgscen.pca_command_line:run_t7k_pca',
+            'pgscen-pca-solar=pgscen.command_line:create_pca_solar_scenarios',
+            'pgscen-pca-load-solar'
+            '=pgscen.command_line:create_load_solar_scenarios',
+            'pgscen-pca=pgscen.command_line:create_pca_scenarios',
 
             'pgscen-rts=pgscen.rts_gmlc.command_line:create_scenarios',
             'pgscen-rts-joint'
