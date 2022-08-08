@@ -1,6 +1,8 @@
 """Command line interface for generating scenarios for the RTS-GMLC system."""
 
 import argparse
+import pandas as pd
+
 from ..command_line import (parent_parser, pca_parser,
                             ScenarioGenerator, PCAScenarioGenerator)
 
@@ -62,6 +64,7 @@ def create_pca_solar_scenarios():
     scen_generator = RtsPCAScenarioGenerator(args)
     scen_generator.produce_scenarios(create_solar=True)
 
+
 def create_pca_load_solar_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-rts-pca-load-solar', parents=[joint_pca_parser],
@@ -88,14 +91,12 @@ def create_pca_scenarios():
         scen_generator.produce_scenarios(create_wind=True,
                                          create_load_solar=True)
     else:
-        scen_generator.produce_scenarios(create_load=True, create_wind=True)
-        scen_generator.produce_scenarios(create_solar=True)
-
-        #scen_generator.produce_scenarios(create_load=True, create_wind=True,
-        #                                 create_solar=True)
+        scen_generator.produce_scenarios(create_load=True, create_wind=True,
+                                         create_solar=True)
 
 
 class RtsScenarioGenerator(ScenarioGenerator):
+    """Class used by command-line tools for creating RTS-GMLC scenarios."""
 
     scenario_label = "RTS-GMLC"
     us_state = 'California'
@@ -106,7 +107,9 @@ class RtsScenarioGenerator(ScenarioGenerator):
 
         super().__init__(args)
 
-    def produce_load_scenarios(self, scen_timesteps):
+    def produce_load_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> GeminiEngine:
+
         if self.actuals['load'] is None:
             self.actuals['load'], self.forecasts['load'] = load_load_data(
                 self.input_dir)
@@ -131,7 +134,9 @@ class RtsScenarioGenerator(ScenarioGenerator):
 
         return load_engn
 
-    def produce_wind_scenarios(self, scen_timesteps):
+    def produce_wind_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> GeminiEngine:
+
         if self.actuals['wind'] is None:
             (self.actuals['wind'], self.forecasts['wind'],
                 self.metadata['wind']) = load_wind_data(self.input_dir)
@@ -154,7 +159,9 @@ class RtsScenarioGenerator(ScenarioGenerator):
 
         return wind_engn
 
-    def produce_solar_scenarios(self, scen_timesteps):
+    def produce_solar_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> SolarGeminiEngine:
+
         if self.actuals['solar'] is None:
             (self.actuals['solar'], self.forecasts['solar'],
                 self.metadata['solar']) = load_solar_data(self.input_dir)
@@ -177,7 +184,9 @@ class RtsScenarioGenerator(ScenarioGenerator):
 
         return solar_engn
 
-    def produce_load_solar_scenarios(self, scen_timesteps):
+    def produce_load_solar_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> SolarGeminiEngine:
+
         if self.actuals['load'] is None:
             self.actuals['load'], self.forecasts['load'] = load_load_data(
                 self.input_dir)
@@ -222,10 +231,13 @@ class RtsScenarioGenerator(ScenarioGenerator):
 
 
 class RtsPCAScenarioGenerator(PCAScenarioGenerator, RtsScenarioGenerator):
+    """Class used by command-line tools for creating RTS-GMLC PCA scenarios."""
 
     scenario_label = "RTS-GMLC PCA"
 
-    def produce_solar_scenarios(self, scen_timesteps):
+    def produce_solar_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> PCAGeminiEngine:
+
         if self.actuals['solar'] is None:
             (self.actuals['solar'], self.forecasts['solar'],
                 self.metadata['solar']) = load_solar_data(self.input_dir)
@@ -252,7 +264,9 @@ class RtsPCAScenarioGenerator(PCAScenarioGenerator, RtsScenarioGenerator):
 
         return solar_engn
 
-    def produce_load_solar_scenarios(self, scen_timesteps):
+    def produce_load_solar_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> PCAGeminiEngine:
+
         if self.actuals['load'] is None:
             self.actuals['load'], self.forecasts['load'] = load_load_data(
                 self.input_dir)
@@ -281,13 +295,16 @@ class RtsPCAScenarioGenerator(PCAScenarioGenerator, RtsScenarioGenerator):
                                      solar_site_forecast_hists,
                                      scen_timesteps[0], self.metadata['solar'],
                                      us_state=self.us_state)
+
         dist = solar_engn.asset_distance().values
+        solar_asset_rho = 2 * self.asset_rho * dist / dist.max()
 
         solar_engn.fit_load_solar_joint_model(
             load_hist_actual_df=load_zone_actual_hists,
             load_hist_forecast_df=load_zone_forecast_hists,
-            joint_asset_rho=dist / (10 * dist.max()),
-            solar_pca_comp_rho=5e-2, num_of_components=self.components,
+            load_asset_rho=self.asset_rho, load_horizon_rho=self.time_rho,
+            solar_asset_rho=solar_asset_rho, solar_pca_comp_rho=self.time_rho,
+            joint_asset_rho=self.asset_rho, num_of_components=self.components,
             nearest_days=self.nearest_days,
             use_all_load_hist=self.use_all_load_hist
             )
