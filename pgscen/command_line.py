@@ -7,7 +7,9 @@ import shutil
 import bz2
 import dill as pickle
 import time
+
 from abc import ABC, abstractmethod
+from typing import Tuple, Iterable
 
 import numpy as np
 import pandas as pd
@@ -79,12 +81,12 @@ pca_parser.add_argument(
 joint_parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
 joint_pca_parser = argparse.ArgumentParser(parents=[pca_parser], add_help=False)
 
-for parser in (joint_parser, joint_pca_parser):
-    parser.add_argument('--use-all-load-history',
-                        action='store_true', dest='use_all_load_hist',
-                        help="train load models using all out-of-sample "
-                             "historical days instead of the same "
-                             "window used for solar models")
+for prs in (joint_parser, joint_pca_parser):
+    prs.add_argument('--use-all-load-history',
+                     action='store_true', dest='use_all_load_hist',
+                     help="train load models using all out-of-sample "
+                          "historical days instead of the same "
+                          "window used for solar models")
 
 
 # tools for creating a particular type of scenario
@@ -149,6 +151,7 @@ def create_scenarios():
         scen_generator.produce_scenarios(create_solar=True)
 
 
+# tools for creating scenarios using Principal Component Analysis time-features
 def create_pca_solar_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-pca-solar', parents=[pca_parser],
@@ -190,12 +193,13 @@ def create_pca_scenarios():
 
 
 class ScenarioGenerator(ABC):
+    """Abstract base class for interfaces between command-line and PGscen."""
 
     scenario_label = None
     us_state = None
     start_hour = None
 
-    def __init__(self, args):
+    def __init__(self, args: argparse.Namespace) -> None:
         self.start_date = args.start
         self.ndays = args.days
         self.scen_count = args.scenario_count
@@ -217,7 +221,7 @@ class ScenarioGenerator(ABC):
         self.metadata = {'wind': None, 'solar': None}
         self.futures = {'load': None, 'wind': None, 'solar': None}
 
-    def days(self):
+    def days(self) -> Iterable[Tuple[str, pd.DatetimeIndex, Path]]:
         for daily_start_time in pd.date_range(start=self.start_time,
                                               periods=self.ndays,
                                               freq='D', tz='utc'):
@@ -374,7 +378,47 @@ class ScenarioGenerator(ABC):
         pass
 
 
+class PCAScenarioGenerator(ScenarioGenerator, ABC):
+    """Abstract class for creating PCA solar scenarios via command-line."""
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        if args.components.isdigit() and args.components != '0':
+            self.components = int(args.components)
+
+        elif args.components[:2] == '0.' and args.components[2:].isdigit():
+            self.components = float(args.components)
+        elif args.components[0] == '.' and args.components[1:].isdigit():
+            self.components = float(args.components)
+
+        elif args.components != 'mle':
+            raise ValueError("Invalid <components> value of `{}`! See "
+                             "sklearn.decomposition.PCA for accepted argument "
+                             "values.".format(self.components))
+
+        super().__init__(args)
+
+    def daily_message(self, scen_engines):
+        """Prints how much of the solar variance the PCA model explained."""
+
+        if self.verbosity >= 2 and 'solar' in scen_engines:
+            mdl_components = scen_engines['solar'].model.num_of_components
+            mdl_explained = 1 - scen_engines['solar'].model.pca_residual
+
+            print("Used {} PCA components which explained "
+                  "{:.2%} of the variance in the solar "
+                  "training data.".format(mdl_components, mdl_explained))
+
+    @abstractmethod
+    def produce_solar_scenarios(self, scen_timesteps):
+        pass
+
+    @abstractmethod
+    def produce_load_solar_scenarios(self, scen_timesteps):
+        pass
+
+
 class T7kScenarioGenerator(ScenarioGenerator):
+    """Class used by command-line tools for creating Texas-7k scenarios."""
 
     scenario_label = "Texas-7k"
     us_state = 'Texas'
@@ -493,36 +537,10 @@ class T7kScenarioGenerator(ScenarioGenerator):
         return solar_engn
 
 
-class T7kPCAScenarioGenerator(T7kScenarioGenerator):
+class T7kPCAScenarioGenerator(PCAScenarioGenerator, T7kScenarioGenerator):
+    """Class used by command-line tools for creating Texas-7k PCA scenarios."""
 
     scenario_label = "Texas-7k PCA"
-
-    def __init__(self, args):
-        if args.components.isdigit() and args.components != '0':
-            self.components = int(args.components)
-
-        elif args.components[:2] == '0.' and args.components[2:].isdigit():
-            self.components = float(args.components)
-        elif args.components[0] == '.' and args.components[1:].isdigit():
-            self.components = float(args.components)
-
-        elif args.components != 'mle':
-            raise ValueError("Invalid <components> value of `{}`! See "
-                             "sklearn.decomposition.PCA for accepted argument "
-                             "values.".format(self.components))
-
-        super().__init__(args)
-
-    def daily_message(self, scen_engines):
-        """Prints how much of the solar variance the PCA model explained."""
-
-        if self.verbosity >= 2 and 'solar' in scen_engines:
-            mdl_components = scen_engines['solar'].model.num_of_components
-            mdl_explained = 1 - scen_engines['solar'].model.pca_residual
-
-            print("Used {} PCA components which explained "
-                  "{:.2%} of the variance in the solar "
-                  "training data.".format(mdl_components, mdl_explained))
 
     def produce_solar_scenarios(self, scen_timesteps):
         if self.actuals['solar'] is None:
