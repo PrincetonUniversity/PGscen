@@ -12,6 +12,7 @@ from ..pca import PCAGeminiEngine
 from .data_utils import load_load_data, load_wind_data, load_solar_data
 from ..utils.data_utils import (split_actuals_hist_future,
                                 split_forecasts_hist_future)
+from joblib import Parallel, delayed
 
 
 rts_parser = argparse.ArgumentParser(add_help=False, parents=[parent_parser])
@@ -32,22 +33,31 @@ for parser in (joint_parser, joint_pca_parser):
                              "historical days instead of the same "
                              "window used for solar models")
 
-#TODO: RTS solar models seem to be numerically unstable — why?
+
+# TODO: RTS solar models seem to be numerically unstable — why?
 def create_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-rts', parents=[rts_parser],
         description="Create day-ahead RTS load, wind, and solar scenarios."
-        ).parse_args()
+    ).parse_args()
 
     scen_generator = RtsScenarioGenerator(args)
-    scen_generator.produce_scenarios(create_load=True, create_wind=True,
-                                     create_solar=True)
+    if args.tuning == '':
+        scen_generator.produce_scenarios(create_load=True, create_wind=True,
+                                         create_solar=True)
+    elif args.tuning == 'rhos':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
+                                                             create_solar=True, asset_rho=asset_rho, time_rho=time_rho)
+            for
+            asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
+
 
 def create_joint_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-rts-joint', parents=[joint_parser],
         description="Create day-ahead RTS wind and load-solar joint scenarios."
-        ).parse_args()
+    ).parse_args()
 
     scen_generator = RtsScenarioGenerator(args)
     scen_generator.produce_scenarios(create_wind=True, create_load_solar=True)

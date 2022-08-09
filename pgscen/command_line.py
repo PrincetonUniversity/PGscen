@@ -274,6 +274,15 @@ class ScenarioGenerator(ABC):
         """Logging info about the scenario models fit for a given day."""
         pass
 
+    def produce_scenarios_tuning(self, create_load: bool = False, create_wind: bool = False,
+                                 create_solar: bool = False,
+                                 create_load_solar: bool = False, asset_rho=None, time_rho=None):
+
+        if asset_rho != None:
+            self.asset_rho = asset_rho
+            self.time_rho = time_rho
+            self.produce_scenarios(create_load, create_wind, create_solar, create_load_solar)
+
     def produce_scenarios(self,
                           create_load: bool = False, create_wind: bool = False,
                           create_solar: bool = False,
