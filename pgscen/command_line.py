@@ -276,12 +276,16 @@ class ScenarioGenerator(ABC):
 
     def produce_scenarios_tuning(self, create_load: bool = False, create_wind: bool = False,
                                  create_solar: bool = False,
-                                 create_load_solar: bool = False, asset_rho=None, time_rho=None):
+                                 create_load_solar: bool = False, asset_rho=None, time_rho=None,
+                                 nearest_days=None):
 
         if asset_rho != None:
             self.asset_rho = asset_rho
             self.time_rho = time_rho
-            self.produce_scenarios(create_load, create_wind, create_solar, create_load_solar)
+        elif nearest_days != None:
+            self.nearest_days = nearest_days
+
+        self.produce_scenarios(create_load, create_wind, create_solar, create_load_solar)
 
     def produce_scenarios(self,
                           create_load: bool = False, create_wind: bool = False,

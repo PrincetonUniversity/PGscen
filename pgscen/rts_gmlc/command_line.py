@@ -49,8 +49,12 @@ def create_scenarios():
         Parallel(n_jobs=31, verbose=-1)(
             delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
                                                              create_solar=True, asset_rho=asset_rho, time_rho=time_rho)
-            for
-            asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
+            for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
+    elif args.tuning == 'nearest_days':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
+                                                             create_solar=True, nearest_days=nearest_days)
+            for nearest_days in args.tuning_list_1)
 
 
 def create_joint_scenarios():
