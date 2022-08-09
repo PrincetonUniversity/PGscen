@@ -7,7 +7,7 @@ from pathlib import Path
 
 setuptools.setup(
     name='pgscen',
-    version='0.2.1-a0',
+    version='0.2.1-a2',
     description="power grid scenario creation platform for "
                 "load and production of wind and solar",
 
@@ -24,24 +24,27 @@ setuptools.setup(
 
     entry_points={
         'console_scripts': [
-            'pgscen-load=pgscen.command_line:run_load',
-            'pgscen-wind=pgscen.command_line:run_wind',
-            'pgscen-solar=pgscen.command_line:run_solar',
-            'pgscen-load-solar=pgscen.command_line:run_load_solar_joint',
-            'pgscen=pgscen.command_line:run_t7k',
+            'pgscen-load=pgscen.command_line:create_load_scenarios',
+            'pgscen-wind=pgscen.command_line:create_wind_scenarios',
+            'pgscen-solar=pgscen.command_line:create_solar_scenarios',
+            'pgscen-load-solar'
+            '=pgscen.command_line:create_load_solar_scenarios',
+            'pgscen=pgscen.command_line:create_scenarios',
 
-            'pgscen-pca-solar=pgscen.pca_command_line:run_solar',
-            'pgscen-pca-load-solar=pgscen.pca_command_line:run_load_solar',
-            'pgscen-pca=pgscen.pca_command_line:run_t7k_pca',
+            'pgscen-pca-solar=pgscen.command_line:create_pca_solar_scenarios',
+            'pgscen-pca-load-solar'
+            '=pgscen.command_line:create_load_solar_scenarios',
+            'pgscen-pca=pgscen.command_line:create_pca_scenarios',
 
-            'pgscen-rts=pgscen.rts_gmlc.command_line:run_rts',
-            'pgscen-rts-joint=pgscen.rts_gmlc.command_line:run_rts_joint',
-            'pgscen-rts-solar=pgscen.rts_gmlc.command_line:run_rts_solar',
-            'pgscen-rts-pca-solar=pgscen.rts_gmlc.pca_command_line:run_solar',
+            'pgscen-rts=pgscen.rts_gmlc.command_line:create_scenarios',
+            'pgscen-rts-joint'
+            '=pgscen.rts_gmlc.command_line:create_joint_scenarios',
+            'pgscen-rts-pca-solar'
+            '=pgscen.rts_gmlc.command_line:create_pca_solar_scenarios',
             'pgscen-rts-pca-load-solar'
-            '=pgscen.rts_gmlc.pca_command_line:run_load_solar',
-            'pgscen-rts-pca=pgscen.rts_gmlc.pca_command_line:run_rts_pca',
-        ],
+            '=pgscen.rts_gmlc.command_line:create_pca_load_solar_scenarios',
+            'pgscen-rts-pca=pgscen.rts_gmlc.command_line:create_pca_scenarios',
+            ],
         },
 
     install_requires=['numpy', 'matplotlib', 'pandas', 'scipy'],

@@ -1,18 +1,13 @@
 """Command line interface for generating scenarios for the RTS-GMLC system."""
 
 import argparse
-from pathlib import Path
-import shutil
-import time
-import bz2
-import dill as pickle
-
-import numpy as np
 import pandas as pd
 
-from ..command_line import parent_parser
+from ..command_line import (parent_parser, pca_parser,
+                            ScenarioGenerator, PCAScenarioGenerator)
+
 from ..engine import GeminiEngine, SolarGeminiEngine
-from ..scoring import compute_energy_scores, compute_variograms
+from ..pca import PCAGeminiEngine
 
 from .data_utils import load_load_data, load_wind_data, load_solar_data
 from ..utils.data_utils import (split_actuals_hist_future,
@@ -20,31 +15,34 @@ from ..utils.data_utils import (split_actuals_hist_future,
 
 
 rts_parser = argparse.ArgumentParser(add_help=False, parents=[parent_parser])
-rts_parser.add_argument('rts_dir', type=str,
+rts_pca_parser = argparse.ArgumentParser(add_help=False, parents=[pca_parser])
+
+for parser in (rts_parser, rts_pca_parser):
+    parser.add_argument('rts_dir', type=str,
                         help="where RTS-GMLC repository is stored")
 
 joint_parser = argparse.ArgumentParser(parents=[rts_parser], add_help=False)
-joint_parser.add_argument('--use-all-load-history',
-                          action='store_true', dest='use_all_load_hist',
-                          help="train load models using all out-of-sample "
-                               "historical days instead of the same "
-                               "window used for solar models")
+joint_pca_parser = argparse.ArgumentParser(parents=[rts_pca_parser],
+                                           add_help=False)
+
+for parser in (joint_parser, joint_pca_parser):
+    parser.add_argument('--use-all-load-history',
+                        action='store_true', dest='use_all_load_hist',
+                        help="train load models using all out-of-sample "
+                             "historical days instead of the same "
+                             "window used for solar models")
 
 
 #TODO: RTS solar models seem to be numerically unstable — why?
-def run_rts():
+def create_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-rts', parents=[rts_parser],
         description="Create day-ahead RTS load, wind, and solar scenarios."
         ).parse_args()
 
-    rts_runner(args.start, args.days, args.rts_dir, args.out_dir,
-               args.scenario_count, args.nearest_days, args.asset_rho,
-               args.time_rho, args.random_seed, create_load=True,
-               create_wind=True, create_solar=True, write_csv=not args.pickle,
-               skip_existing=args.skip_existing,
-               get_energy_scores=args.energy_scores,
-               get_variograms=args.variograms, verbosity=args.verbose)
+    scen_generator = RtsScenarioGenerator(args)
+    scen_generator.produce_scenarios(create_load=True, create_wind=True,
+                                     create_solar=True)
 
 def run_rts_solar():
     args = argparse.ArgumentParser(
@@ -60,275 +58,273 @@ def run_rts_solar():
                get_energy_scores=args.energy_scores,
                get_variograms=args.variograms, verbosity=args.verbose)
 
-def run_rts_joint():
+def create_joint_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-rts-joint', parents=[joint_parser],
         description="Create day-ahead RTS wind and load-solar joint scenarios."
         ).parse_args()
 
-    rts_runner(args.start, args.days, args.rts_dir, args.out_dir,
-               args.scenario_count, args.nearest_days, args.asset_rho,
-               args.time_rho, args.random_seed, create_load=False,
-               create_wind=True, create_load_solar=True,
-               write_csv=not args.pickle, skip_existing=args.skip_existing,
-               use_all_load_hist=args.use_all_load_hist,
-               get_energy_scores=args.energy_scores,
-               get_variograms=args.variograms, verbosity=args.verbose)
+    scen_generator = RtsScenarioGenerator(args)
+    scen_generator.produce_scenarios(create_wind=True, create_load_solar=True)
 
 
-def rts_runner(start_date, ndays, rts_dir, out_dir, scen_count, nearest_days,
-               asset_rho, time_rho, random_seed, create_load=False,
-               create_wind=False, create_solar=False, create_load_solar=False,
-               write_csv=True, skip_existing=False, use_all_load_hist=False,
-               get_energy_scores=False, get_variograms=False, tuning=False, verbosity=0):
-    start = ' '.join([start_date, "08:00:00"])
+def create_pca_solar_scenarios():
+    args = argparse.ArgumentParser(
+        'pgscen-rts-pca-solar', parents=[rts_pca_parser],
+        description="Create day ahead RTS solar scenarios using PCA features."
+        ).parse_args()
 
-    if random_seed:
-        np.random.seed(random_seed)
+    scen_generator = RtsPCAScenarioGenerator(args)
+    scen_generator.produce_scenarios(create_solar=True)
 
-    if create_load or create_load_solar:
-        load_zone_actual_df, load_zone_forecast_df = load_load_data(rts_dir)
 
-    if create_wind:
-        (wind_site_actual_df, wind_site_forecast_df,
-            wind_meta_df) = load_wind_data(rts_dir)
+def create_pca_load_solar_scenarios():
+    args = argparse.ArgumentParser(
+        'pgscen-rts-pca-load-solar', parents=[joint_pca_parser],
+        description="Create day ahead RTS load-solar joint-modeled scenarios."
+        ).parse_args()
 
-    if create_solar or create_load_solar:
-        (solar_site_actual_df, solar_site_forecast_df,
-            solar_meta_df) = load_solar_data(rts_dir)
+    scen_generator = RtsPCAScenarioGenerator(args)
+    scen_generator.produce_scenarios(create_load_solar=True)
 
-    if verbosity >= 2:
-        t0 = time.time()
 
-    for scenario_start_time in pd.date_range(start=start, periods=ndays,
-                                             freq='D', tz='utc'):
-        date_lbl = scenario_start_time.strftime('%Y-%m-%d')
+def create_pca_scenarios():
+    parser = argparse.ArgumentParser(
+        'pgscen-rts-pca', parents=[joint_pca_parser],
+        description="Create day-ahead RTS load, wind, and solar PCA scenarios."
+        )
 
-        scen_timesteps = pd.date_range(start=scenario_start_time,
-                                       periods=24, freq='H')
+    parser.add_argument('--joint', action='store_true',
+                        help="use a joint load-solar model")
 
-        if verbosity >= 1:
-            print("Creating RTS-GMLC scenarios for: {} with {} {}".format(date_lbl, asset_rho, time_rho))
+    args = parser.parse_args()
+    scen_generator = RtsPCAScenarioGenerator(args)
 
-        if get_energy_scores:
-            energy_scores = dict()
-        if get_variograms:
-            variograms = dict()
+    if args.joint:
+        scen_generator.produce_scenarios(create_wind=True,
+                                         create_load_solar=True)
+    else:
+        scen_generator.produce_scenarios(create_load=True, create_wind=True,
+                                         create_solar=True)
 
-        if not write_csv and not tuning:
-            out_fl = Path(out_dir, "scens_{}_{}_{}.p.gz".format(date_lbl, asset_rho, time_rho))
 
-            if skip_existing and out_fl.exists():
-                continue
+class RtsScenarioGenerator(ScenarioGenerator):
+    """Class used by command-line tools for creating RTS-GMLC scenarios."""
 
-            out_scens = dict()
+    scenario_label = "RTS-GMLC"
+    us_state = 'California'
+    start_hour = '08:00:00'
 
-        if write_csv and skip_existing and not tuning:
-            date_path = Path(out_dir, scenario_start_time.strftime('%Y%m%d'))
+    def __init__(self, args):
+        self.input_dir = args.rts_dir
 
-            if ((create_load or create_load_solar)
-                    and Path(date_path, 'load').exists()):
-                shutil.rmtree(Path(date_path, 'load'))
+        super().__init__(args)
 
-            if create_wind and Path(date_path, 'wind').exists():
-                shutil.rmtree(Path(date_path, 'wind'))
+    def produce_load_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> GeminiEngine:
 
-            if ((create_solar or create_load_solar)
-                    and Path(date_path, 'solar').exists()):
-                shutil.rmtree(Path(date_path, 'solar'))
+        if self.actuals['load'] is None:
+            self.actuals['load'], self.forecasts['load'] = load_load_data(
+                self.input_dir)
 
         # split input datasets into training and testing subsets
         # for RTS we always do in-sample since we only have a year of data
-        if create_load or create_load_solar:
-            (load_zone_actual_hists,
-                load_zone_actual_futures) = split_actuals_hist_future(
-                        load_zone_actual_df, scen_timesteps, in_sample=True)
-            (load_zone_forecast_hists,
-                load_zone_forecast_futures) = split_forecasts_hist_future(
-                        load_zone_forecast_df, scen_timesteps, in_sample=True)
+        (load_zone_actual_hists,
+            self.futures['load']) = split_actuals_hist_future(
+                    self.actuals['load'], scen_timesteps, in_sample=True)
+        (load_zone_forecast_hists,
+            load_zone_forecast_futures) = split_forecasts_hist_future(
+                    self.forecasts['load'], scen_timesteps, in_sample=True)
 
-        if create_wind:
-            (wind_site_actual_hists,
-                wind_site_actual_futures) = split_actuals_hist_future(
-                        wind_site_actual_df, scen_timesteps, in_sample=True)
-            (wind_site_forecast_hists,
-                wind_site_forecast_futures) = split_forecasts_hist_future(
-                        wind_site_forecast_df, scen_timesteps, in_sample=True)
+        load_engn = GeminiEngine(load_zone_actual_hists,
+                                 load_zone_forecast_hists,
+                                 scen_timesteps[0], asset_type='load')
 
-            wind_engn = GeminiEngine(wind_site_actual_hists,
-                                     wind_site_forecast_hists,
-                                     scenario_start_time, wind_meta_df, 'wind')
+        load_engn.fit(self.asset_rho, self.time_rho)
+        load_engn.create_scenario(self.scen_count,
+                                  load_zone_forecast_futures,
+                                  bin_width_ratio=0.1, min_sample_size=400)
 
-        if create_solar or create_load_solar:
-            (solar_site_actual_hists,
-                solar_site_actual_futures) = split_actuals_hist_future(
-                        solar_site_actual_df, scen_timesteps, in_sample=True)
-            (solar_site_forecast_hists,
-                solar_site_forecast_futures) = split_forecasts_hist_future(
-                        solar_site_forecast_df, scen_timesteps, in_sample=True)
+        return load_engn
 
-            solar_engn = SolarGeminiEngine(solar_site_actual_hists,
-                                           solar_site_forecast_hists,
-                                           scenario_start_time, solar_meta_df,
-                                           us_state='California')
+    def produce_wind_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> GeminiEngine:
 
-        if create_load:
-            load_engn = GeminiEngine(load_zone_actual_hists,
-                                     load_zone_forecast_hists,
-                                     scenario_start_time, asset_type='load')
+        if self.actuals['wind'] is None:
+            (self.actuals['wind'], self.forecasts['wind'],
+                self.metadata['wind']) = load_wind_data(self.input_dir)
 
-            load_engn.fit(asset_rho, time_rho, nearest_days)
-            load_engn.create_scenario(scen_count, load_zone_forecast_futures,
-                                      bin_width_ratio=0.1, min_sample_size=400)
+        (wind_site_actual_hists,
+            self.futures['wind']) = split_actuals_hist_future(
+                    self.actuals['wind'], scen_timesteps, in_sample=True)
+        (wind_site_forecast_hists,
+            wind_site_forecast_futures) = split_forecasts_hist_future(
+                    self.forecasts['wind'], scen_timesteps, in_sample=True)
 
-            if get_energy_scores:
-                energy_scores['Load'] = compute_energy_scores(
-                    load_engn.scenarios['load'],
-                    load_zone_actual_df, load_zone_forecast_df
-                )
+        wind_engn = GeminiEngine(
+            wind_site_actual_hists, wind_site_forecast_hists,
+            scen_timesteps[0], self.metadata['wind'], asset_type='wind'
+            )
 
-            if get_variograms:
-                variograms['Load'] = compute_variograms(
-                    load_engn.scenarios['load'],
-                    load_zone_actual_df, load_zone_forecast_df
-                )
-            if not tuning:
-                if write_csv:
-                    load_engn.write_to_csv(out_dir, load_zone_actual_futures,
-                                           write_forecasts=True)
-                else:
-                    out_scens['Load'] = load_engn.scenarios['load'].round(4)
+        dist = wind_engn.asset_distance().values
+        wind_engn.fit(2 * self.asset_rho * dist / dist.max(), self.time_rho)
+        wind_engn.create_scenario(self.scen_count, wind_site_forecast_futures)
 
-        if create_wind:
-            dist = wind_engn.asset_distance().values
-            wind_engn.fit(2 * asset_rho * dist / dist.max(), time_rho,
-                          nearest_days)
-            wind_engn.create_scenario(scen_count, wind_site_forecast_futures)
+        return wind_engn
 
-            if get_energy_scores:
-                energy_scores['Wind'] = compute_energy_scores(
-                    wind_engn.scenarios['wind'],
-                    wind_site_actual_df, wind_site_forecast_df
-                )
+    def produce_solar_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> SolarGeminiEngine:
 
-            if get_variograms:
-                variograms['Wind'] = compute_variograms(
-                    wind_engn.scenarios['wind'],
-                    wind_site_actual_df, wind_site_forecast_df
-                )
+        if self.actuals['solar'] is None:
+            (self.actuals['solar'], self.forecasts['solar'],
+                self.metadata['solar']) = load_solar_data(self.input_dir)
 
-            if not tuning:
-                if write_csv:
-                    wind_engn.write_to_csv(out_dir, wind_site_actual_futures,
-                                           write_forecasts=True)
-                else:
-                    out_scens['Wind'] = wind_engn.scenarios['wind'].round(4)
+        (solar_site_actual_hists,
+            self.futures['solar']) = split_actuals_hist_future(
+                    self.actuals['solar'], scen_timesteps, in_sample=True)
+        (solar_site_forecast_hists,
+            solar_site_forecast_futures) = split_forecasts_hist_future(
+                    self.forecasts['solar'], scen_timesteps, in_sample=True)
 
-        if create_solar:
-            solar_engn.fit_solar_model(nearest_days=nearest_days)
-            solar_engn.create_solar_scenario(scen_count,
-                                             solar_site_forecast_futures)
+        solar_engn = SolarGeminiEngine(
+            solar_site_actual_hists, solar_site_forecast_hists,
+            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state
+            )
 
-            if get_energy_scores:
-                energy_scores['Solar'] = compute_energy_scores(
-                    solar_engn.scenarios['solar'],
-                    solar_site_actual_df, solar_site_forecast_df
-                )
+        solar_engn.fit_solar_model(nearest_days=self.nearest_days)
+        solar_engn.create_solar_scenario(self.scen_count,
+                                         solar_site_forecast_futures)
 
-            if get_variograms:
-                variograms['Solar'] = compute_variograms(
-                    solar_engn.scenarios['solar'],
-                    solar_site_actual_df, solar_site_forecast_df
-                )
-            if not tuning:
-                if write_csv:
-                    solar_engn.write_to_csv(out_dir,
-                                            {'solar': solar_site_actual_futures},
-                                            write_forecasts=True)
-                else:
-                    out_scens['Solar'] = solar_engn.scenarios['solar'].round(4)
+        return solar_engn
 
-        if create_load_solar:
-            solar_engn.fit_load_solar_joint_model(
-                load_zone_actual_hists, load_zone_forecast_hists,
-                nearest_days=nearest_days, use_all_load_hist=use_all_load_hist
-                )
+    def produce_load_solar_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> SolarGeminiEngine:
 
-            solar_engn.create_load_solar_joint_scenario(
-                scen_count,
-                load_zone_forecast_futures, solar_site_forecast_futures
-                )
+        if self.actuals['load'] is None:
+            self.actuals['load'], self.forecasts['load'] = load_load_data(
+                self.input_dir)
 
-            if get_energy_scores:
-                energy_scores['Load'] = compute_energy_scores(
-                    solar_engn.scenarios['load'],
-                    load_zone_actual_df, load_zone_forecast_df
-                    )
-                energy_scores['Solar'] = compute_energy_scores(
-                    solar_engn.scenarios['solar'],
-                    solar_site_actual_df, solar_site_forecast_df
-                    )
+        if self.actuals['solar'] is None:
+            (self.actuals['solar'], self.forecasts['solar'],
+                self.metadata['solar']) = load_solar_data(self.input_dir)
 
-            if get_variograms:
-                variograms['Load'] = compute_variograms(
-                    solar_engn.scenarios['load'],
-                    load_zone_actual_df, load_zone_forecast_df
-                )
-                variograms['Solar'] = compute_variograms(
-                    solar_engn.scenarios['solar'],
-                    solar_site_actual_df, solar_site_forecast_df
-                )
+        # split input datasets into training and testing subsets
+        # for RTS we always do in-sample since we only have a year of data
+        (load_zone_actual_hists,
+            self.futures['load']) = split_actuals_hist_future(
+                    self.actuals['load'], scen_timesteps, in_sample=True)
+        (load_zone_forecast_hists,
+            load_zone_forecast_futures) = split_forecasts_hist_future(
+                    self.forecasts['load'], scen_timesteps, in_sample=True)
 
-            if not tuning:
-                if write_csv:
-                    solar_engn.write_to_csv(out_dir,
-                                            {'load': load_zone_actual_futures,
-                                             'solar': solar_site_actual_futures},
-                                            write_forecasts=True)
-                else:
-                    out_scens['Load'] = solar_engn.scenarios['load'].round(4)
-                    out_scens['Solar'] = solar_engn.scenarios['solar'].round(4)
+        (solar_site_actual_hists,
+            self.futures['solar']) = split_actuals_hist_future(
+                    self.actuals['solar'], scen_timesteps, in_sample=True)
+        (solar_site_forecast_hists,
+            solar_site_forecast_futures) = split_forecasts_hist_future(
+                    self.forecasts['solar'], scen_timesteps, in_sample=True)
 
-        if not write_csv and not tuning:
-            with bz2.BZ2File(out_fl, 'w') as f:
-                pickle.dump(out_scens, f, protocol=-1)
+        solar_engn = SolarGeminiEngine(
+            solar_site_actual_hists, solar_site_forecast_hists,
+            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state
+            )
 
-        if get_energy_scores:
-            with bz2.BZ2File(Path(out_dir,
-                                  'escores_{}_{}_{}.p.gz'.format(date_lbl, asset_rho, time_rho)),
-                             'w') as f:
-                pickle.dump(energy_scores, f, protocol=-1)
+        solar_engn.fit_load_solar_joint_model(
+            load_zone_actual_hists, load_zone_forecast_hists,
+            nearest_days=self.nearest_days,
+            use_all_load_hist=self.use_all_load_hist
+            )
 
-        if get_variograms:
-            with bz2.BZ2File(Path(out_dir,
-                                  'varios_{}_{}_{}.p.gz'.format(date_lbl, asset_rho, time_rho)),
-                             'w') as f:
-                pickle.dump(variograms, f, protocol=-1)
+        solar_engn.create_load_solar_joint_scenario(
+            self.scen_count,
+            load_zone_forecast_futures, solar_site_forecast_futures
+            )
 
-    if verbosity >= 2:
-        if ndays == 1:
-            day_str = "day"
-        else:
-            day_str = "days"
+        return solar_engn
 
-        type_lbls = list()
-        if create_load:
-            type_lbls += ['load']
-        if create_wind:
-            type_lbls += ['wind']
-        if create_solar:
-            type_lbls += ['solar']
-        if create_load_solar:
-            type_lbls += ['joint load-solar']
 
-        if len(type_lbls) == 1:
-            type_str = type_lbls[0]
-        elif len(type_lbls) == 2:
-            type_str = ' and '.join(type_lbls)
+class RtsPCAScenarioGenerator(PCAScenarioGenerator, RtsScenarioGenerator):
+    """Class used by command-line tools for creating RTS-GMLC PCA scenarios."""
 
-        else:
-            type_str = ', and '.join([', '.join(type_lbls[:-1]),
-                                      type_lbls[-1]])
+    scenario_label = "RTS-GMLC PCA"
 
-        print("Created {} {} scenarios for {} {} in {:.1f} seconds".format(
-            scen_count, type_str, ndays, day_str, time.time() - t0))
+    def produce_solar_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> PCAGeminiEngine:
+
+        if self.actuals['solar'] is None:
+            (self.actuals['solar'], self.forecasts['solar'],
+                self.metadata['solar']) = load_solar_data(self.input_dir)
+
+        (solar_site_actual_hists,
+            self.futures['solar']) = split_actuals_hist_future(
+                    self.actuals['solar'], scen_timesteps, in_sample=True)
+        (solar_site_forecast_hists,
+            solar_site_forecast_futures) = split_forecasts_hist_future(
+                    self.forecasts['solar'], scen_timesteps, in_sample=True)
+
+        solar_engn = PCAGeminiEngine(solar_site_actual_hists,
+                                     solar_site_forecast_hists,
+                                     scen_timesteps[0], self.metadata['solar'],
+                                     us_state=self.us_state)
+        dist = solar_engn.asset_distance().values
+
+        solar_engn.fit(asset_rho=2 * self.asset_rho * dist / dist.max(),
+                       pca_comp_rho=self.time_rho,
+                       num_of_components=self.components,
+                       nearest_days=self.nearest_days)
+        solar_engn.create_scenario(self.scen_count,
+                                   solar_site_forecast_futures)
+
+        return solar_engn
+
+    def produce_load_solar_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> PCAGeminiEngine:
+
+        if self.actuals['load'] is None:
+            self.actuals['load'], self.forecasts['load'] = load_load_data(
+                self.input_dir)
+
+        if self.actuals['solar'] is None:
+            (self.actuals['solar'], self.forecasts['solar'],
+                self.metadata['solar']) = load_solar_data(self.input_dir)
+
+        # split input datasets into training and testing subsets
+        # for RTS we always do in-sample since we only have a year of data
+        (load_zone_actual_hists,
+            self.futures['load']) = split_actuals_hist_future(
+                    self.actuals['load'], scen_timesteps, in_sample=True)
+        (load_zone_forecast_hists,
+            load_zone_forecast_futures) = split_forecasts_hist_future(
+                    self.forecasts['load'], scen_timesteps, in_sample=True)
+
+        (solar_site_actual_hists,
+            self.futures['solar']) = split_actuals_hist_future(
+                    self.actuals['solar'], scen_timesteps, in_sample=True)
+        (solar_site_forecast_hists,
+            solar_site_forecast_futures) = split_forecasts_hist_future(
+                    self.forecasts['solar'], scen_timesteps, in_sample=True)
+
+        solar_engn = PCAGeminiEngine(solar_site_actual_hists,
+                                     solar_site_forecast_hists,
+                                     scen_timesteps[0], self.metadata['solar'],
+                                     us_state=self.us_state)
+
+        dist = solar_engn.asset_distance().values
+        solar_asset_rho = 2 * self.asset_rho * dist / dist.max()
+
+        solar_engn.fit_load_solar_joint_model(
+            load_hist_actual_df=load_zone_actual_hists,
+            load_hist_forecast_df=load_zone_forecast_hists,
+            load_asset_rho=self.asset_rho, load_horizon_rho=self.time_rho,
+            solar_asset_rho=solar_asset_rho, solar_pca_comp_rho=self.time_rho,
+            joint_asset_rho=self.asset_rho, num_of_components=self.components,
+            nearest_days=self.nearest_days,
+            use_all_load_hist=self.use_all_load_hist
+            )
+
+        solar_engn.create_load_solar_joint_scenario(
+            self.scen_count,
+            load_zone_forecast_futures, solar_site_forecast_futures
+            )
+
+        return solar_engn
