@@ -69,6 +69,15 @@ parent_parser.add_argument('--variograms', action='store_true',
                            help="quantify scenario quality with variograms")
 
 parent_parser.add_argument('--test', action='store_true')
+
+# add arguments to parent_parser for different tuning types
+parent_parser.add_argument('--tuning', type=str, default='', dest='tuning',
+                           help='string to indicate the tuning type')
+parent_parser.add_argument('--tuning-list-1', action="extend", nargs="+", type=float,
+                           dest='tuning_list_1', help='the list of tuning param 1')
+parent_parser.add_argument('--tuning-list-2', action="extend", nargs="+", type=float,
+                           dest='tuning_list_2', help='the list of tuning param 2')
+
 test_path = Path(Path(__file__).parent.parent, 'test', 'resources')
 
 pca_parser = argparse.ArgumentParser(add_help=False, parents=[parent_parser])
@@ -76,7 +85,7 @@ pca_parser.add_argument(
     '--components', '-c', type=str, default='0.99',
     help="How many factors to use when fitting the PCA."
          "See sklearn.decomposition.PCA for possible argument values."
-    )
+)
 
 joint_parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
 joint_pca_parser = argparse.ArgumentParser(parents=[pca_parser],
@@ -220,6 +229,8 @@ class ScenarioGenerator(ABC):
         self.energy_scores = args.energy_scores
         self.variograms = args.variograms
 
+        self.tuning = args.tuning
+
         self.actuals = {'load': None, 'wind': None, 'solar': None}
         self.forecasts = {'load': None, 'wind': None, 'solar': None}
         self.metadata = {'wind': None, 'solar': None}
@@ -310,23 +321,24 @@ class ScenarioGenerator(ABC):
                     energy_scores[asset_lbl] = compute_energy_scores(
                         scen_engine.scenarios[asset_type],
                         self.actuals[asset_type], self.forecasts[asset_type]
-                        )
+                    )
 
                 if self.variograms:
                     variograms[asset_lbl] = compute_variograms(
                         scen_engine.scenarios[asset_type],
                         self.actuals[asset_type], self.forecasts[asset_type]
-                        )
+                    )
 
-                if self.write_csv:
-                    scen_engine.write_to_csv(self.output_dir,
-                                             self.futures[asset_type],
-                                             write_forecasts=True)
-                else:
-                    out_scens[asset_type.capitalize()] = scen_engine.scenarios[
-                        asset_type].round(4)
+                if self.tuning == '':
+                    if self.write_csv:
+                        scen_engine.write_to_csv(self.output_dir,
+                                                 self.futures[asset_type],
+                                                 write_forecasts=True)
+                    else:
+                        out_scens[asset_type.capitalize()] = scen_engine.scenarios[
+                            asset_type].round(4)
 
-            if not self.write_csv:
+            if self.tuning == '' and not self.write_csv:
                 with bz2.BZ2File(out_path, 'w') as f:
                     pickle.dump(out_scens, f, protocol=-1)
 

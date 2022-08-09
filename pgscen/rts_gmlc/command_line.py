@@ -32,7 +32,6 @@ for parser in (joint_parser, joint_pca_parser):
                              "historical days instead of the same "
                              "window used for solar models")
 
-
 #TODO: RTS solar models seem to be numerically unstable — why?
 def create_scenarios():
     args = argparse.ArgumentParser(
@@ -43,20 +42,6 @@ def create_scenarios():
     scen_generator = RtsScenarioGenerator(args)
     scen_generator.produce_scenarios(create_load=True, create_wind=True,
                                      create_solar=True)
-
-def run_rts_solar():
-    args = argparse.ArgumentParser(
-        'pgscen-rts-solar', parents=[rts_parser],
-        description="Create day-ahead RTS solar scenarios."
-    ).parse_args()
-
-    rts_runner(args.start, args.days, args.rts_dir, args.out_dir,
-               args.scenario_count, args.nearest_days, args.asset_rho,
-               args.time_rho, args.random_seed, create_load=False,
-               create_wind=False, create_solar=True, write_csv=not args.pickle,
-               skip_existing=args.skip_existing,
-               get_energy_scores=args.energy_scores,
-               get_variograms=args.variograms, verbosity=args.verbose)
 
 def create_joint_scenarios():
     args = argparse.ArgumentParser(
