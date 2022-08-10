@@ -50,7 +50,6 @@ def create_scenarios():
             delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
                                                              create_solar=True, asset_rho=asset_rho, time_rho=time_rho)
             for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
-
     # neraest days is only used in the solar scenarios
     elif args.tuning == 'nearest_days':
         Parallel(n_jobs=31, verbose=-1)(
@@ -84,7 +83,11 @@ def create_pca_solar_scenarios():
     ).parse_args()
 
     scen_generator = RtsPCAScenarioGenerator(args)
-    if args.tuning == 'components':
+    if args.tuning == 'rhos':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_load=True, asset_rho=asset_rho, time_rho=time_rho)
+            for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
+    elif args.tuning == 'components':
         Parallel(n_jobs=31, verbose=-1)(
             delayed(scen_generator.produce_scenarios_tuning)(create_solar=True,
                                                              components=components)
