@@ -51,6 +51,11 @@ parent_parser.add_argument('--asset-rho', type=float,
 parent_parser.add_argument('--time-rho', type=float,
                            default=0.05, dest='time_rho')
 
+parent_parser.add_argument('--bin-width-ratio', type=float,
+                           default=0.1, dest='bin_width_ratio')
+parent_parser.add_argument('--min-sample-size', type=float,
+                           default=400, dest='min_sample_size')
+
 parent_parser.add_argument('--random-seed', type=int, dest='random_seed',
                            help="fix the stochastic component of scenario "
                                 "generation for testing purposes")
@@ -72,6 +77,7 @@ parent_parser.add_argument('--test', action='store_true')
 
 # add arguments to parent_parser for different tuning types
 parent_parser.add_argument('--tuning', type=str, default='', dest='tuning',
+                           choices=['rhos', 'nearest_days', 'wind_specific', 'components'],
                            help='string to indicate the tuning type')
 parent_parser.add_argument('--tuning-list-1', action="extend", nargs="+", type=float,
                            dest='tuning_list_1', help='the list of tuning param 1')
@@ -217,6 +223,8 @@ class ScenarioGenerator(ABC):
         self.asset_rho = args.asset_rho
         self.time_rho = args.time_rho
         self.nearest_days = args.nearest_days
+        self.bin_width_ratio = args.bin_width_ratio
+        self.min_sample_size = args.min_sample_size
         self.use_all_load_hist = args.use_all_load_hist
 
         self.output_dir = args.out_dir
@@ -277,13 +285,33 @@ class ScenarioGenerator(ABC):
     def produce_scenarios_tuning(self, create_load: bool = False, create_wind: bool = False,
                                  create_solar: bool = False,
                                  create_load_solar: bool = False, asset_rho=None, time_rho=None,
-                                 nearest_days=None):
-
-        if asset_rho != None:
+                                 nearest_days=None, bin_width_ratio=None, min_sample_size=None,
+                                 components=None):
+        # Change the output directory to store files with different tunings in different folders
+        # Update the parameter to the tuning value
+        if self.tuning == 'rhos':
+            self.output_dir = os.path.join(self.output_dir, self.tuning + '_' + str(asset_rho) + '_' + str(time_rho))
+            if not os.path.isdir(self.output_dir):
+                os.mkdir(self.output_dir)
             self.asset_rho = asset_rho
             self.time_rho = time_rho
-        elif nearest_days != None:
+        elif self.tuning == 'nearest_days':
+            self.output_dir = os.path.join(self.output_dir, self.tuning + '_' + str(components))
+            if not os.path.isdir(self.output_dir):
+                os.mkdir(self.output_dir)
             self.nearest_days = nearest_days
+        elif self.tuning == 'wind_specific':
+            self.output_dir = os.path.join(self.output_dir, self.tuning + '_'
+                                           + str(bin_width_ratio) + '_' + str(min_sample_size))
+            if not os.path.isdir(self.output_dir):
+                os.mkdir(self.output_dir)
+            self.bin_width_ratio = bin_width_ratio
+            self.min_sample_size = min_sample_size
+        elif self.tuning == 'components':
+            self.output_dir = os.path.join(self.output_dir, self.tuning + '_' + str(components))
+            if not os.path.isdir(self.output_dir):
+                os.mkdir(self.output_dir)
+            self.components = components
 
         self.produce_scenarios(create_load, create_wind, create_solar, create_load_solar)
 
@@ -355,14 +383,20 @@ class ScenarioGenerator(ABC):
                 with bz2.BZ2File(out_path, 'w') as f:
                     pickle.dump(out_scens, f, protocol=-1)
 
+            # Update output path based on tuning or not
+            if self.tuning == '':
+                scores_out_path = out_path.parent
+            else:
+                scores_out_path = self.output_dir
+
             if self.energy_scores:
-                with bz2.BZ2File(Path(out_path.parent,
+                with bz2.BZ2File(Path(scores_out_path,
                                       'escores_{}.p.gz'.format(date_lbl)),
                                  'w') as f:
                     pickle.dump(energy_scores, f, protocol=-1)
 
             if self.variograms:
-                with bz2.BZ2File(Path(out_path.parent,
+                with bz2.BZ2File(Path(scores_out_path,
                                       'varios_{}.p.gz'.format(date_lbl)),
                                  'w') as f:
                     pickle.dump(variograms, f, protocol=-1)
@@ -493,7 +527,7 @@ class T7kScenarioGenerator(ScenarioGenerator):
         load_engn.fit(self.asset_rho, self.time_rho)
         load_engn.create_scenario(self.scen_count,
                                   load_zone_forecast_futures,
-                                  bin_width_ratio=0.1, min_sample_size=400)
+                                  bin_width_ratio=self.bin_width_ratio, min_sample_size=self.min_sample_size)
 
         return load_engn
 

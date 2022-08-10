@@ -55,7 +55,19 @@ def create_scenarios():
             delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
                                                              create_solar=True, nearest_days=nearest_days)
             for nearest_days in args.tuning_list_1)
-
+    elif args.tuning == 'wind_specific':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
+                                                             create_solar=True,
+                                                             bin_width_ratio=bin_width_ratio,
+                                                             min_sample_size=min_sample_size)
+            for bin_width_ratio in args.tuning_list_1 for min_sample_size in args.tuning_list_2)
+    elif args.tuning == 'components':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
+                                                             create_solar=True,
+                                                             components=components)
+            for components in args.tuning_list_1)
 
 def create_joint_scenarios():
     args = argparse.ArgumentParser(
