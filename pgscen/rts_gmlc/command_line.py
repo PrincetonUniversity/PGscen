@@ -50,24 +50,22 @@ def create_scenarios():
             delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
                                                              create_solar=True, asset_rho=asset_rho, time_rho=time_rho)
             for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
+
+    # neraest days is only used in the solar scenarios
     elif args.tuning == 'nearest_days':
         Parallel(n_jobs=31, verbose=-1)(
-            delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
+            delayed(scen_generator.produce_scenarios_tuning)(create_load=False, create_wind=False,
                                                              create_solar=True, nearest_days=nearest_days)
             for nearest_days in args.tuning_list_1)
+    # wind specific is only used in the wind scenarios
     elif args.tuning == 'wind_specific':
         Parallel(n_jobs=31, verbose=-1)(
-            delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
-                                                             create_solar=True,
+            delayed(scen_generator.produce_scenarios_tuning)(create_load=False, create_wind=True,
+                                                             create_solar=False,
                                                              bin_width_ratio=bin_width_ratio,
                                                              min_sample_size=min_sample_size)
             for bin_width_ratio in args.tuning_list_1 for min_sample_size in args.tuning_list_2)
-    elif args.tuning == 'components':
-        Parallel(n_jobs=31, verbose=-1)(
-            delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
-                                                             create_solar=True,
-                                                             components=components)
-            for components in args.tuning_list_1)
+
 
 def create_joint_scenarios():
     args = argparse.ArgumentParser(
@@ -83,10 +81,14 @@ def create_pca_solar_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-rts-pca-solar', parents=[rts_pca_parser],
         description="Create day ahead RTS solar scenarios using PCA features."
-        ).parse_args()
+    ).parse_args()
 
     scen_generator = RtsPCAScenarioGenerator(args)
-    scen_generator.produce_scenarios(create_solar=True)
+    if args.tuning == 'components':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_solar=True,
+                                                             components=components)
+            for components in args.tuning_list_1)
 
 
 def create_pca_load_solar_scenarios():
