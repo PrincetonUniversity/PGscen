@@ -9,6 +9,7 @@ from joblib import Parallel, delayed
 
 
 # Command Line Usage Examples
+# Not tuning
 # python3 01_construct_db.py '/scratch/gpfs/jf3375/data/scenario_data/v0.4.1-20k'
 # '/scratch/gpfs/jf3375/output/scenario_data/v0.4.1-20k' 'Scenario' --energy_type 'Wind'
 #
@@ -20,6 +21,11 @@ from joblib import Parallel, delayed
 #
 # python3 01_construct_db.py '/scratch/gpfs/jf3375/data/scenario_data/v0.4.1-20k'
 # '/scratch/gpfs/jf3375/output/score_data/v0.4.1-20k' 'Scores'
+#
+# Tuning
+# python3 /home/jf3375/repos/PGscen/01_construct_db.py '/home/jf3375/pgscen-output/pca'
+# '/home/jf3375/pgscen-output/tuning_final_files' 'Scores' --tuning-list-1 0.60 0.65 0.70 0.75 0.80 0.85  0.90 0.95 0.99  --tuning 'components'
+
 
 def main():
     parser = argparse.ArgumentParser(description='Enter directories to merge and compress data files')
@@ -30,38 +36,51 @@ def main():
     parser.add_argument("out_dir", type=str,
                         help="where the final output is saved")
 
-    parser.add_argument("ending_str", type=str,
-                        help="customized ending string of the output file name")
-
-    parser.add_argument("data_type", type=str, choices=['Scores', 'Scenario'], default='Scenario',
+    parser.add_argument("data_type", type=str, choices=['Scores', 'Scenario'],
                         help="extract the data type")
 
     parser.add_argument("--energy_type", type=str, choices=['Wind', 'Load', 'Solar'],
                         help="extract the energy type; extract scores data will be for all energy types")
 
-    parser.add_argument('--asset-rho-list', action="extend", nargs="+", type=float,
-                        dest='asset_rho_list', help='the list of asset rho values for tuning')
-
-    parser.add_argument('--time-rho-list', action="extend", nargs="+", type=float,
-                        dest='time_rho_list', help='the list of time rho values for tuning')
+    # add arguments to parser for different tuning types
+    parser.add_argument('--tuning', type=str, default='', dest='tuning',
+                        choices=['rhos', 'nearest_days', 'load_specific', 'components'],
+                        help='string to indicate the tuning type')
+    parser.add_argument('--tuning-list-1', action="extend", nargs="+", type=float,
+                        dest='tuning_list_1', help='the list of tuning param 1')
+    parser.add_argument('--tuning-list-2', action="extend", nargs="+", type=float,
+                        dest='tuning_list_2', help='the list of tuning param 2')
 
     args = parser.parse_args()
 
-    if not args.asset_rho_list:
+    if args.tuning == '':
         if args.data_type == 'Scenario':
             merge_output_scenarios_files_daily(args.inp_dir, args.out_dir, args.energy_type)
         else:
             merge_output_scores_files(args.inp_dir, args.out_dir)
     else:
-        if args.data_type == 'Scenario':
-            Parallel(n_jobs=31, verbose=-1)(
-                delayed(merge_output_scenarios_files_daily)(args.inp_dir, args.out_dir, args.energy_type, asset_rho,
-                                                            time_rho) for asset_rho in
-                args.asset_rho_list for time_rho in args.time_rho_list)
+        if args.tuning == 'rhos' or args.tuning == 'load_specific':
+            if args.data_type == 'Scenario':
+                Parallel(n_jobs=31, verbose=-1)(
+                    delayed(merge_output_scenarios_files_daily)(args.inp_dir, args.out_dir, args.energy_type,
+                                                                args.tuning, param1,
+                                                                param2) for param1 in
+                    args.tuning_list_1 for param2 in args.tuning_list_2)
+            else:
+                Parallel(n_jobs=31, verbose=-1)(
+                    delayed(merge_output_scores_files)(args.inp_dir, args.out_dir, args.tuning, param1,
+                                                       param2) for param1 in
+                    args.tuning_list_1 for param2 in args.tuning_list_2)
         else:
-            Parallel(n_jobs=31, verbose=-1)(
-                delayed(merge_output_scores_files)(args.inp_dir, args.out_dir, asset_rho, time_rho) for asset_rho in
-                args.asset_rho_list for time_rho in args.time_rho_list)
+            if args.data_type == 'Scenario':
+                Parallel(n_jobs=31, verbose=-1)(
+                    delayed(merge_output_scenarios_files_daily)(args.inp_dir, args.out_dir, args.energy_type,
+                                                                args.tuning, param1) for param1 in
+                    args.tuning_list_1)
+            else:
+                Parallel(n_jobs=31, verbose=-1)(
+                    delayed(merge_output_scores_files)(args.inp_dir, args.out_dir, args.tuning, param1) for param1 in
+                    args.tuning_list_1)
 
 
 def extract_daily_file(file, energy_type, input_dir, drop_index=True):
@@ -123,9 +142,15 @@ def merge_output_scenarios_files_quarterly(input_dir, output_dir, n_jobs=30):
             delayed(output_file)(file, file_name, output_dir) for file, file_name in zip(outputs_list, files_name_list))
 
 
-def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, ending_str='', n_jobs=31):
-    # initialize output dataframes
-    input_dir = os.path.join(input_dir, ending_str)
+def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, tuning='', param1='', param2='', n_jobs=31):
+    # ending string
+    if tuning != '':
+        if tuning == 'rhos' or tuning == 'load_specific':
+            ending_str = tuning + '_' + str(param1) + '_' + str(param2)
+        else:
+            ending_str = tuning + '_' + str(param1)
+        # initialize the input directory with ending str
+        input_dir = os.path.join(input_dir, ending_str)
 
     os.chdir(input_dir)
     files_list = sorted([i for i in os.listdir(input_dir) if i[0:5] == 'scens'])
@@ -149,11 +174,17 @@ def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, endin
             zip(panel_df_list, files_name_list))
 
 
-def merge_output_scores_files(input_dir, output_dir, ending_str=''):
-    input_dir = os.path.join(input_dir, ending_str)
+def merge_output_scores_files(input_dir, output_dir, tuning='', param1='', param2=''):
+    # ending string and add it to input dir
+    if tuning != '':
+        if tuning == 'rhos' or tuning == 'load_specific':
+            ending_str = tuning + '_' + str(param1) + '_' + str(param2)
+        else:
+            ending_str = tuning + '_' + str(param1)
+        # initialize the input directory with ending str
+        input_dir = os.path.join(input_dir, ending_str)
 
     os.chdir(input_dir)
-
     # list input fuiles
     escores_files_list = [i for i in os.listdir() if i[:7] == 'escores']
     varios_files_list = [i for i in os.listdir() if i[:6] == 'varios']
