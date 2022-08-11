@@ -26,7 +26,7 @@ joint_parser = argparse.ArgumentParser(parents=[rts_parser], add_help=False)
 joint_pca_parser = argparse.ArgumentParser(parents=[rts_pca_parser],
                                            add_help=False)
 
-for parser in (joint_parser, joint_pca_parser):
+for parser in (rts_parser, rts_pca_parser, joint_parser, joint_pca_parser):
     parser.add_argument('--use-all-load-history',
                         action='store_true', dest='use_all_load_hist',
                         help="train load models using all out-of-sample "
@@ -57,9 +57,9 @@ def create_scenarios():
                                                              create_solar=True, nearest_days=nearest_days)
             for nearest_days in args.tuning_list_1)
     # wind specific is only used in the wind scenarios
-    elif args.tuning == 'wind_specific':
+    elif args.tuning == 'load_specific':
         Parallel(n_jobs=31, verbose=-1)(
-            delayed(scen_generator.produce_scenarios_tuning)(create_load=False, create_wind=True,
+            delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=False,
                                                              create_solar=False,
                                                              bin_width_ratio=bin_width_ratio,
                                                              min_sample_size=min_sample_size)
@@ -85,7 +85,7 @@ def create_pca_solar_scenarios():
     scen_generator = RtsPCAScenarioGenerator(args)
     if args.tuning == 'rhos':
         Parallel(n_jobs=31, verbose=-1)(
-            delayed(scen_generator.produce_scenarios_tuning)(create_load=True, asset_rho=asset_rho, time_rho=time_rho)
+            delayed(scen_generator.produce_scenarios_tuning)(create_solar=True, asset_rho=asset_rho, time_rho=time_rho)
             for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
     elif args.tuning == 'components':
         Parallel(n_jobs=31, verbose=-1)(

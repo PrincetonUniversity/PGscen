@@ -77,7 +77,7 @@ parent_parser.add_argument('--test', action='store_true')
 
 # add arguments to parent_parser for different tuning types
 parent_parser.add_argument('--tuning', type=str, default='', dest='tuning',
-                           choices=['rhos', 'nearest_days', 'wind_specific', 'components'],
+                           choices=['rhos', 'nearest_days', 'load_specific', 'components'],
                            help='string to indicate the tuning type')
 parent_parser.add_argument('--tuning-list-1', action="extend", nargs="+", type=float,
                            dest='tuning_list_1', help='the list of tuning param 1')
@@ -296,11 +296,11 @@ class ScenarioGenerator(ABC):
             self.asset_rho = asset_rho
             self.time_rho = time_rho
         elif self.tuning == 'nearest_days':
-            self.output_dir = os.path.join(self.output_dir, self.tuning + '_' + str(components))
+            self.output_dir = os.path.join(self.output_dir, self.tuning + '_' + str(nearest_days))
             if not os.path.isdir(self.output_dir):
                 os.mkdir(self.output_dir)
             self.nearest_days = nearest_days
-        elif self.tuning == 'wind_specific':
+        elif self.tuning == 'load_specific':
             self.output_dir = os.path.join(self.output_dir, self.tuning + '_'
                                            + str(bin_width_ratio) + '_' + str(min_sample_size))
             if not os.path.isdir(self.output_dir):

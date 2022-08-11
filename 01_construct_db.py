@@ -30,6 +30,9 @@ def main():
     parser.add_argument("out_dir", type=str,
                         help="where the final output is saved")
 
+    parser.add_argument("ending_str", type=str,
+                        help="customized ending string of the output file name")
+
     parser.add_argument("data_type", type=str, choices=['Scores', 'Scenario'], default='Scenario',
                         help="extract the data type")
 
@@ -120,13 +123,8 @@ def merge_output_scenarios_files_quarterly(input_dir, output_dir, n_jobs=30):
             delayed(output_file)(file, file_name, output_dir) for file, file_name in zip(outputs_list, files_name_list))
 
 
-def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, asset_rho=None, time_rho=None, n_jobs=31):
+def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, ending_str='', n_jobs=31):
     # initialize output dataframes
-    if asset_rho:
-        ending_str = str(asset_rho) + '_' + str(time_rho)
-    else:
-        ending_str = ''
-
     input_dir = os.path.join(input_dir, ending_str)
 
     os.chdir(input_dir)
@@ -151,12 +149,7 @@ def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, asset
             zip(panel_df_list, files_name_list))
 
 
-def merge_output_scores_files(input_dir, output_dir, asset_rho=None, time_rho=None):
-    if asset_rho:
-        ending_str = str(asset_rho) + '_' + str(time_rho)
-    else:
-        ending_str = ''
-
+def merge_output_scores_files(input_dir, output_dir, ending_str=''):
     input_dir = os.path.join(input_dir, ending_str)
 
     os.chdir(input_dir)
