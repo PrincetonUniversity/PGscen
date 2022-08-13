@@ -273,8 +273,21 @@ class ScenarioGenerator(ABC):
                                            periods=24, freq='H')
 
             if self.verbosity >= 1:
-                print("Creating {} scenarios for: {}".format(
-                    self.scenario_label, date_lbl))
+                if self.tuning == '':
+                    print("Creating {} scenarios for: {}".format(
+                        self.scenario_label, date_lbl))
+                elif self.tuning == 'rhos':
+                    print("Created {} scenarios for {} asset rho {} time rho{}"
+                          "seconds".format(self.scenario_label, date_lbl, self.asset_rho, self.time_rho))
+                elif self.tuning == 'load_specific':
+                    print("Created {} scenarios for {} bin_width_ratio {} min_sample_size{}"
+                          "seconds".format(self.scenario_label, date_lbl, self.bin_width_ratio, self.min_sample_size))
+                elif self.tuning == 'components':
+                    print("Created {} scenarios for {} components {}"
+                          "seconds".format(self.scenario_label, date_lbl, self.components))
+                elif self.tuning == 'nearest_days':
+                    print("Created {} scenarios for {} nearest_days {}"
+                          "seconds".format(self.scenario_label, date_lbl, self.nearest_days))
 
             yield date_lbl, scen_timesteps, out_path
 
