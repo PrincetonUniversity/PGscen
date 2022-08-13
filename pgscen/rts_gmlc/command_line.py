@@ -159,7 +159,7 @@ class RtsScenarioGenerator(ScenarioGenerator):
         load_engn.fit(self.asset_rho, self.time_rho)
         load_engn.create_scenario(self.scen_count,
                                   load_zone_forecast_futures,
-                                  bin_width_ratio=0.1, min_sample_size=400)
+                                  bin_width_ratio=self.bin_width_ratio, min_sample_size=self.min_sample_size)
 
         return load_engn
 
