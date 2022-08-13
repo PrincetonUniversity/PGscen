@@ -429,10 +429,26 @@ class ScenarioGenerator(ABC):
             else:
                 day_str = "days"
 
-            print("Created {} {} scenarios for {} {} in {:.1f} "
-                  "seconds".format(self.scen_count, type_str, self.ndays,
-                                   day_str, time.time() - t0))
-
+            if self.tuning == '':
+                print("Created {} {} scenarios for {} {} in {:.1f} "
+                      "seconds".format(self.scen_count, type_str, self.ndays,
+                                       day_str, time.time() - t0))
+            elif self.tuning == 'rhos':
+                print("Created {} {} scenarios for {} {} in {:.1f} asset rho {} time rho{}"
+                      "seconds".format(self.scen_count, type_str, self.ndays,
+                                       day_str, time.time() - t0, self.asset_rho, self.time_rho))
+            elif self.tuning == 'load_specific':
+                print("Created {} {} scenarios for {} {} in {:.1f} bin_width_ratio {} min_sample_size{}"
+                      "seconds".format(self.scen_count, type_str, self.ndays,
+                                       day_str, time.time() - t0, self.bin_width_ratio, self.min_sample_size))
+            elif self.tuning == 'components':
+                print("Created {} {} scenarios for {} {} in {:.1f} components {}"
+                      "seconds".format(self.scen_count, type_str, self.ndays,
+                                       day_str, time.time() - t0, self.components))
+            elif self.tuning == 'nearest_days':
+                print("Created {} {} scenarios for {} {} in {:.1f} components {}"
+                      "seconds".format(self.scen_count, type_str, self.ndays,
+                                       day_str, time.time() - t0, self.nearest_days))
     @abstractmethod
     def produce_load_scenarios(
             self, scen_timesteps: pd.DatetimeIndex) -> GeminiEngine:
