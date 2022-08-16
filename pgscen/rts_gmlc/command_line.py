@@ -62,7 +62,7 @@ def create_scenarios():
             delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=False,
                                                              create_solar=False,
                                                              bin_width_ratio=bin_width_ratio,
-                                                             min_sample_size=min_sample_size)
+                                                             min_sample_size=int(min_sample_size))
             for bin_width_ratio in args.tuning_list_1 for min_sample_size in args.tuning_list_2)
 
 
