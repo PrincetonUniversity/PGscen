@@ -50,6 +50,12 @@ def create_scenarios():
             delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
                                                              create_solar=True, asset_rho=asset_rho, time_rho=time_rho)
             for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
+    # distance measure is only used for solar and load scenarios
+    elif args.tuning == 'distance_measure':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_load=False, create_wind=True,
+                                                             create_solar=True, dist_meas=dist_meas)
+            for dist_meas in args.dist_meas_list)
     # neraest days is only used in the solar scenarios
     elif args.tuning == 'nearest_days':
         Parallel(n_jobs=31, verbose=-1)(
@@ -92,7 +98,11 @@ def create_pca_solar_scenarios():
             delayed(scen_generator.produce_scenarios_tuning)(create_solar=True,
                                                              components=components)
             for components in args.tuning_list_1)
-
+    elif args.tuning == 'distance_measure':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_solar=True,
+                                                             dist_meas=dist_meas)
+            for dist_meas in args.dist_meas_list)
 
 def create_pca_load_solar_scenarios():
     args = argparse.ArgumentParser(
@@ -171,19 +181,18 @@ class RtsScenarioGenerator(ScenarioGenerator):
                 self.metadata['wind']) = load_wind_data(self.input_dir)
 
         (wind_site_actual_hists,
-            self.futures['wind']) = split_actuals_hist_future(
-                    self.actuals['wind'], scen_timesteps, in_sample=True)
+         self.futures['wind']) = split_actuals_hist_future(
+            self.actuals['wind'], scen_timesteps, in_sample=True)
         (wind_site_forecast_hists,
-            wind_site_forecast_futures) = split_forecasts_hist_future(
-                    self.forecasts['wind'], scen_timesteps, in_sample=True)
+         wind_site_forecast_futures) = split_forecasts_hist_future(
+            self.forecasts['wind'], scen_timesteps, in_sample=True)
 
         wind_engn = GeminiEngine(
             wind_site_actual_hists, wind_site_forecast_hists,
-            scen_timesteps[0], self.metadata['wind'], asset_type='wind'
-            )
+            scen_timesteps[0], self.metadata['wind'], asset_type='wind', dist_meas=self.dist_meas)
 
-        dist = wind_engn.asset_distance().values
-        wind_engn.fit(2 * self.asset_rho * dist / dist.max(), self.time_rho)
+        norm_dist, _ = wind_engn.asset_distance(self.dist_meas)
+        wind_engn.fit(2 * self.asset_rho * norm_dist, self.time_rho)
         wind_engn.create_scenario(self.scen_count, wind_site_forecast_futures)
 
         return wind_engn
@@ -204,8 +213,8 @@ class RtsScenarioGenerator(ScenarioGenerator):
 
         solar_engn = SolarGeminiEngine(
             solar_site_actual_hists, solar_site_forecast_hists,
-            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state
-            )
+            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state, dist_meas=self.dist_meas
+        )
 
         solar_engn.fit_solar_model(nearest_days=self.nearest_days)
         solar_engn.create_solar_scenario(self.scen_count,
@@ -242,8 +251,8 @@ class RtsScenarioGenerator(ScenarioGenerator):
 
         solar_engn = SolarGeminiEngine(
             solar_site_actual_hists, solar_site_forecast_hists,
-            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state
-            )
+            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state, dist_meas=self.dist_meas
+        )
 
         solar_engn.fit_load_solar_joint_model(
             load_zone_actual_hists, load_zone_forecast_hists,
@@ -273,18 +282,18 @@ class RtsPCAScenarioGenerator(PCAScenarioGenerator, RtsScenarioGenerator):
 
         (solar_site_actual_hists,
             self.futures['solar']) = split_actuals_hist_future(
-                    self.actuals['solar'], scen_timesteps, in_sample=True)
+            self.actuals['solar'], scen_timesteps, in_sample=True)
         (solar_site_forecast_hists,
-            solar_site_forecast_futures) = split_forecasts_hist_future(
-                    self.forecasts['solar'], scen_timesteps, in_sample=True)
+         solar_site_forecast_futures) = split_forecasts_hist_future(
+            self.forecasts['solar'], scen_timesteps, in_sample=True)
 
         solar_engn = PCAGeminiEngine(solar_site_actual_hists,
                                      solar_site_forecast_hists,
                                      scen_timesteps[0], self.metadata['solar'],
-                                     us_state=self.us_state)
-        dist = solar_engn.asset_distance().values
+                                     us_state=self.us_state, dist_meas=self.dist_meas)
 
-        solar_engn.fit(asset_rho=2 * self.asset_rho * dist / dist.max(),
+        norm_dist, _ = solar_engn.asset_distance(self.dist_meas)
+        solar_engn.fit(asset_rho=2 * self.asset_rho * norm_dist,
                        pca_comp_rho=self.time_rho,
                        num_of_components=self.components,
                        nearest_days=self.nearest_days)
@@ -315,18 +324,18 @@ class RtsPCAScenarioGenerator(PCAScenarioGenerator, RtsScenarioGenerator):
 
         (solar_site_actual_hists,
             self.futures['solar']) = split_actuals_hist_future(
-                    self.actuals['solar'], scen_timesteps, in_sample=True)
+            self.actuals['solar'], scen_timesteps, in_sample=True)
         (solar_site_forecast_hists,
-            solar_site_forecast_futures) = split_forecasts_hist_future(
-                    self.forecasts['solar'], scen_timesteps, in_sample=True)
+         solar_site_forecast_futures) = split_forecasts_hist_future(
+            self.forecasts['solar'], scen_timesteps, in_sample=True)
 
         solar_engn = PCAGeminiEngine(solar_site_actual_hists,
                                      solar_site_forecast_hists,
                                      scen_timesteps[0], self.metadata['solar'],
-                                     us_state=self.us_state)
+                                     us_state=self.us_state, dist_meas=self.dist_meas)
 
-        dist = solar_engn.asset_distance().values
-        solar_asset_rho = 2 * self.asset_rho * dist / dist.max()
+        norm_dist, _ = solar_engn.asset_distance(self.dist_meas)
+        solar_asset_rho = 2 * self.asset_rho * norm_dist
 
         solar_engn.fit_load_solar_joint_model(
             load_hist_actual_df=load_zone_actual_hists,
@@ -336,7 +345,7 @@ class RtsPCAScenarioGenerator(PCAScenarioGenerator, RtsScenarioGenerator):
             joint_asset_rho=self.asset_rho, num_of_components=self.components,
             nearest_days=self.nearest_days,
             use_all_load_hist=self.use_all_load_hist
-            )
+        )
 
         solar_engn.create_load_solar_joint_scenario(
             self.scen_count,

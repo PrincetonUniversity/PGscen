@@ -22,7 +22,6 @@ from .engine import GeminiEngine, SolarGeminiEngine
 from .pca import PCAGeminiEngine, PCAGeminiModel
 from .scoring import compute_energy_scores, compute_variograms
 
-
 # define common command-line arguments across all tools
 parent_parser = argparse.ArgumentParser(add_help=False)
 
@@ -51,6 +50,19 @@ parent_parser.add_argument('--asset-rho', type=float,
 parent_parser.add_argument('--time-rho', type=float,
                            default=0.05, dest='time_rho')
 
+# refer to https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.distance.cdist.html#scipy.spatial.distance.cdist
+# 'No', 'euclidean', 'minkowski1', 'minkowski2', 'minkowski3', 'cityblock',
+# 'cosine', 'correlation', 'hamming', 'jaccard', 'jensenshannon', 'chebyshev', 'canberra', 'braycurtis', 'mahalanobis',
+# 'yule', 'sokalsneath', 'geodistance'
+parent_parser.add_argument('--distance-measure', type=str,
+                           default='euclidean', dest='dist_meas',
+                           choices=['ones', 'euclidean', 'minkowski1', 'minkowski2', 'minkowski3', 'cityblock',
+                                    'cosine', 'correlation', 'hamming', 'jaccard', 'jensenshannon', 'chebyshev',
+                                    'canberra', 'braycurtis', 'mahalanobis',
+                                    'yule', 'sokalsneath', 'geodistance'])
+parent_parser.add_argument('--distance-measure-list', action="extend", nargs="+", type=str,
+                           dest='dist_meas_list', help='the list of distance measures')
+
 parent_parser.add_argument('--bin-width-ratio', type=float,
                            default=0.1, dest='bin_width_ratio')
 parent_parser.add_argument('--min-sample-size', type=float,
@@ -77,7 +89,7 @@ parent_parser.add_argument('--test', action='store_true')
 
 # add arguments to parent_parser for different tuning types
 parent_parser.add_argument('--tuning', type=str, default='', dest='tuning',
-                           choices=['rhos', 'nearest_days', 'load_specific', 'components'],
+                           choices=['rhos', 'nearest_days', 'load_specific', 'components', 'distance_measure'],
                            help='string to indicate the tuning type')
 parent_parser.add_argument('--tuning-list-1', action="extend", nargs="+", type=float,
                            dest='tuning_list_1', help='the list of tuning param 1')
@@ -222,6 +234,7 @@ class ScenarioGenerator(ABC):
 
         self.asset_rho = args.asset_rho
         self.time_rho = args.time_rho
+        self.dist_meas = args.dist_meas
         self.nearest_days = args.nearest_days
         self.bin_width_ratio = args.bin_width_ratio
         self.min_sample_size = args.min_sample_size
@@ -279,6 +292,9 @@ class ScenarioGenerator(ABC):
                 elif self.tuning == 'rhos':
                     print("Created {} scenarios for {} asset rho {} time rho{}"
                           "seconds".format(self.scenario_label, date_lbl, self.asset_rho, self.time_rho))
+                elif self.tuning == 'distance_measure':
+                    print("Created {} scenarios for {} distance_measure {}"
+                          "seconds".format(self.scenario_label, date_lbl, self.dist_meas))
                 elif self.tuning == 'load_specific':
                     print("Created {} scenarios for {} bin_width_ratio {} min_sample_size{}"
                           "seconds".format(self.scenario_label, date_lbl, self.bin_width_ratio, self.min_sample_size))
@@ -298,6 +314,7 @@ class ScenarioGenerator(ABC):
     def produce_scenarios_tuning(self, create_load: bool = False, create_wind: bool = False,
                                  create_solar: bool = False,
                                  create_load_solar: bool = False, asset_rho=None, time_rho=None,
+                                 dist_meas=None,
                                  nearest_days=None, bin_width_ratio=None, min_sample_size=None,
                                  components=None):
         # Change the output directory to store files with different tunings in different folders
@@ -308,6 +325,11 @@ class ScenarioGenerator(ABC):
                 os.mkdir(self.output_dir)
             self.asset_rho = asset_rho
             self.time_rho = time_rho
+        elif self.tuning == 'distance_measure':
+            self.output_dir = os.path.join(self.output_dir, self.tuning + '_' + str(dist_meas))
+            if not os.path.isdir(self.output_dir):
+                os.mkdir(self.output_dir)
+            self.dist_meas = dist_meas
         elif self.tuning == 'nearest_days':
             self.output_dir = os.path.join(self.output_dir, self.tuning + '_' + str(nearest_days))
             if not os.path.isdir(self.output_dir):
@@ -450,6 +472,10 @@ class ScenarioGenerator(ABC):
                 print("Created {} {} scenarios for {} {} in {:.1f} asset rho {} time rho{}"
                       "seconds".format(self.scen_count, type_str, self.ndays,
                                        day_str, time.time() - t0, self.asset_rho, self.time_rho))
+            elif self.tuning == 'distance_measure':
+                print("Created {} scenarios for {} distance_measure {}"
+                      "seconds".format(self.scen_count, type_str, self.dist_meas,
+                                       day_str, time.time() - t0))
             elif self.tuning == 'load_specific':
                 print("Created {} {} scenarios for {} {} in {:.1f} bin_width_ratio {} min_sample_size{}"
                       "seconds".format(self.scen_count, type_str, self.ndays,
@@ -569,18 +595,18 @@ class T7kScenarioGenerator(ScenarioGenerator):
 
         (wind_site_actual_hists,
             self.futures['wind']) = split_actuals_hist_future(
-                    self.actuals['wind'], scen_timesteps, in_sample=True)
+            self.actuals['wind'], scen_timesteps, in_sample=True)
         (wind_site_forecast_hists,
-            wind_site_forecast_futures) = split_forecasts_hist_future(
-                    self.forecasts['wind'], scen_timesteps, in_sample=True)
+         wind_site_forecast_futures) = split_forecasts_hist_future(
+            self.forecasts['wind'], scen_timesteps, in_sample=True)
 
         wind_engn = GeminiEngine(
             wind_site_actual_hists, wind_site_forecast_hists,
-            scen_timesteps[0], self.metadata['wind'], asset_type='wind'
-            )
+            scen_timesteps[0], self.metadata['wind'], asset_type='wind', dist_meas=self.dist_meas
+        )
 
-        dist = wind_engn.asset_distance().values
-        wind_engn.fit(2 * self.asset_rho * dist / dist.max(), self.time_rho)
+        norm_dist, _ = wind_engn.asset_distance(self.dist_meas)
+        wind_engn.fit(2 * self.asset_rho * norm_dist, self.time_rho)
         wind_engn.create_scenario(self.scen_count, wind_site_forecast_futures)
 
         return wind_engn
@@ -601,8 +627,8 @@ class T7kScenarioGenerator(ScenarioGenerator):
 
         solar_engn = SolarGeminiEngine(
             solar_site_actual_hists, solar_site_forecast_hists,
-            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state
-            )
+            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state, dist_meas=self.dist_meas
+        )
 
         solar_engn.fit_solar_model(nearest_days=self.nearest_days)
         solar_engn.create_solar_scenario(self.scen_count,
@@ -638,8 +664,8 @@ class T7kScenarioGenerator(ScenarioGenerator):
 
         solar_engn = SolarGeminiEngine(
             solar_site_actual_hists, solar_site_forecast_hists,
-            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state
-            )
+            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state, dist_meas=self.dist_meas
+        )
 
         solar_engn.fit_load_solar_joint_model(
             load_zone_actual_hists, load_zone_forecast_hists,
@@ -671,16 +697,17 @@ class T7kPCAScenarioGenerator(PCAScenarioGenerator, T7kScenarioGenerator):
             self.futures['solar']) = split_actuals_hist_future(
                     self.actuals['solar'], scen_timesteps, in_sample=False)
         (solar_site_forecast_hists,
-            solar_site_forecast_futures) = split_forecasts_hist_future(
-                    self.forecasts['solar'], scen_timesteps, in_sample=False)
+         solar_site_forecast_futures) = split_forecasts_hist_future(
+            self.forecasts['solar'], scen_timesteps, in_sample=False)
 
         solar_engn = PCAGeminiEngine(solar_site_actual_hists,
                                      solar_site_forecast_hists,
                                      scen_timesteps[0], self.metadata['solar'],
-                                     us_state=self.us_state)
-        dist = solar_engn.asset_distance().values
+                                     us_state=self.us_state,
+                                     dist_meas=self.dist_meas)
 
-        solar_engn.fit(asset_rho=2 * self.asset_rho * dist / dist.max(),
+        norm_dist, _ = solar_engn.asset_distance(self.dist_meas)
+        solar_engn.fit(asset_rho=2 * self.asset_rho * norm_dist,
                        pca_comp_rho=self.time_rho,
                        num_of_components=self.components,
                        nearest_days=self.nearest_days)
@@ -710,20 +737,20 @@ class T7kPCAScenarioGenerator(PCAScenarioGenerator, T7kScenarioGenerator):
 
         (solar_site_actual_hists,
             self.futures['solar']) = split_actuals_hist_future(
-                    self.actuals['solar'], scen_timesteps, in_sample=False)
+            self.actuals['solar'], scen_timesteps, in_sample=False)
         (solar_site_forecast_hists,
-            solar_site_forecast_futures) = split_forecasts_hist_future(
-                    self.forecasts['solar'], scen_timesteps, in_sample=False)
+         solar_site_forecast_futures) = split_forecasts_hist_future(
+            self.forecasts['solar'], scen_timesteps, in_sample=False)
 
         solar_engn = PCAGeminiEngine(solar_site_actual_hists,
                                      solar_site_forecast_hists,
-                                     scen_timesteps[0], self.metadata['solar'],
+                                     scen_timesteps[0], self.metadata['solar'], dist_meas=self.dist_meas,
                                      us_state=self.us_state)
 
-        dist = solar_engn.asset_distance().values
-        solar_asset_rho = 2 * self.asset_rho * dist / dist.max()
+        norm_dist, _ = solar_engn.asset_distance(self.dist_meas)
+        solar_asset_rho = 2 * self.asset_rho * norm_dist
 
-        #TODO: double-check these regularization parametrizations
+        # TODO: double-check these regularization parametrizations
         solar_engn.fit_load_solar_joint_model(
             load_hist_actual_df=load_zone_actual_hists,
             load_hist_forecast_df=load_zone_forecast_hists,

@@ -5,15 +5,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from scipy.spatial import distance
+
 from datetime import datetime
 import calendar
 from operator import itemgetter
 from astral import Observer
 from astral.sun import sun
 from typing import List, Dict, Set, Iterable, Optional, Union
-
 from .model import get_asset_list, GeminiModel, GeminiError
 from .utils.solar_utils import overlap
+
+from geopy.distance import geodesic
 
 
 class GeminiEngine:
@@ -80,7 +83,9 @@ class GeminiEngine:
                  forecast_resolution_in_minute: int = 60,
                  num_of_horizons: int = 24,
                  forecast_lead_time_in_hour: int = 12,
-                 us_state: str = 'Texas') -> None:
+                 us_state: str = 'Texas',
+                 dist_meas: str = None
+                 ) -> None:
 
         # check that the dataframes with actual and forecast values are in the
         # right format, get the names of the assets they contain values for
@@ -97,6 +102,8 @@ class GeminiEngine:
         self.asset_type = asset_type
         self.model = None
 
+        self.dist_meas = dist_meas
+
         # standardize the format of the meta-information dataframe
         if meta_df is not None:
 
@@ -105,7 +112,7 @@ class GeminiEngine:
                 self.meta_df = self.meta_df.sort_values(
                     'site_ids').set_index('site_ids',
                                           verify_integrity=True).rename(
-                        columns={'AC_capacity_MW': 'Capacity'})
+                    columns={'AC_capacity_MW': 'Capacity'})
 
             # wind case
             elif 'Facility.Name' in meta_df.columns:
@@ -253,7 +260,7 @@ class GeminiEngine:
                         :, ['Issue_time', 'Forecast_time'] + assets]
             }
 
-    def asset_distance(self,
+    def asset_distance(self, dist_meas,
                        assets: Optional[Iterable[str]] = None) -> pd.DataFrame:
         """Utility for calculating distances between asset locations."""
 
@@ -270,22 +277,39 @@ class GeminiEngine:
                     raise GeminiError("Given asset `{}` does not have a "
                                       "metadata entry!".format(asset))
 
-        dist = pd.DataFrame(0., index=assets, columns=assets)
+        if dist_meas == 'geodistance':
+            dist_mtx = np.zeros([len(assets), len(assets)])
+            for i in range(len(assets)):
+                for j in range(i + 1, len(assets)):
+                    asset1_coord = [self.meta_df.latitude[assets[i]], self.meta_df.longitude[assets[i]]]
+                    asset2_coord = [self.meta_df.latitude[assets[j]], self.meta_df.longitude[assets[j]]]
+                    dist_val = geodesic(asset1_coord, asset2_coord).km
+                    dist_mtx[i, j] = dist_val
+                    dist_mtx[j, i] = dist_val
+            dist_mtx = (dist_mtx - dist_mtx.min()) / (dist_mtx.max() - dist_mtx.min())
 
-        # calculate Euclidean distances between all pairs of assets
-        for i in range(len(assets)):
-            for j in range(i + 1, len(assets)):
-                dist_val = np.sqrt(
-                    (self.meta_df.latitude[assets[i]]
-                     - self.meta_df.latitude[assets[j]]) ** 2
-                    + (self.meta_df.longitude[assets[i]]
-                       - self.meta_df.longitude[assets[j]]) ** 2
-                    )
+        else:
+            latitudes = []
+            longitudes = []
+            # Construct coordinates mtx
+            for asset in assets:
+                latitudes.append(self.meta_df.latitude[asset])
+                longitudes.append(self.meta_df.longitude[asset])
+            coord_mtx = np.stack((latitudes, longitudes), axis=1)
 
-                dist.loc[assets[i], assets[j]] = dist_val
-                dist.loc[assets[j], assets[i]] = dist_val
-
-        return dist
+            if dist_meas == 'ones':
+                dist_mtx = np.ones([len(assets), len(assets)])
+                # normalie this will give 0 as the denominator
+            elif dist_meas[:-1] == 'minkowski':
+                dist_mtx = distance.cdist(coord_mtx, coord_mtx, dist_meas[:-1], p=int(dist_meas[-1]))
+                dist_mtx = (dist_mtx - dist_mtx.min()) / (dist_mtx.max() - dist_mtx.min())
+            # still develop geodistance codes, refer to previous codes
+            # elif dist_meas == 'geodistance'
+            else:
+                dist_mtx = distance.cdist(coord_mtx, coord_mtx, dist_meas)
+                dist_mtx = (dist_mtx - dist_mtx.min()) / (dist_mtx.max() - dist_mtx.min())
+        dist_df = pd.DataFrame(dist_mtx, index=assets, columns=assets)
+        return dist_mtx, dist_df
 
     def get_forecast(self, forecast_df: pd.DataFrame) -> pd.Series:
         """Get forecasts issued for the period scenarios are generated for."""
@@ -455,19 +479,20 @@ class SolarGeminiEngine(GeminiEngine):
                  forecast_resolution_in_minute: int = 60,
                  num_of_horizons: int = 24,
                  forecast_lead_time_in_hour: int = 12,
-                 us_state: str = 'Texas') -> None:
+                 us_state: str = 'Texas',
+                 dist_meas: str = None) -> None:
 
         if us_state not in self.time_zones:
             raise ValueError(
                 "Unrecognized US state `{}`!"
                 "\nAvailable states are:\n{}".format(
                     us_state, '\n'.join(self.time_zones.keys()))
-                )
+            )
 
         super().__init__(solar_hist_actual_df, solar_hist_forecast_df,
                          scen_start_time, solar_meta_df, 'solar',
                          forecast_resolution_in_minute, num_of_horizons,
-                         forecast_lead_time_in_hour, us_state)
+                         forecast_lead_time_in_hour, us_state, dist_meas)
 
         self.asset_locs = {site: Observer(lat, lon)
                            for site, lat, lon in zip(solar_meta_df.site_ids,
@@ -582,7 +607,7 @@ class SolarGeminiEngine(GeminiEngine):
             cond_indx += 1
 
         self.cond_count = cond_indx
-        self.asset_distance_mat = self.asset_distance()
+        _, self.asset_distance_df = self.asset_distance(self.dist_meas)
 
     def fit_solar_model(self, nearest_days: Optional[int] = None) -> None:
         """Fit each of the solar scenario models in the engine."""
@@ -638,7 +663,9 @@ class SolarGeminiEngine(GeminiEngine):
                                    load_hist_forecast_df: pd.DataFrame,
                                    load_zonal: bool = True,
                                    nearest_days: Optional[int] = None,
-                                   use_all_load_hist: bool = False) -> None:
+                                   use_all_load_hist: bool = False,
+                                   dist_meas: str = 'euclidean',
+                                   ) -> None:
         """
         This function fits a joint load/solar model for each time of day. The
         historical datasets for bus loads are given in the same format as they
@@ -1141,7 +1168,7 @@ class SolarGeminiEngine(GeminiEngine):
         if assets is None:
             assets = self.asset_list
 
-        rho = self.asset_distance_mat.loc[assets, assets].values
+        rho = self.asset_distance_df.loc[assets, assets].values
 
         # normalize distance such that largest entry is equal to 0.1
         if np.max(rho) > 0:

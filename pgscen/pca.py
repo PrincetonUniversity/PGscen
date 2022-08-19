@@ -25,7 +25,8 @@ class PCAGeminiEngine(GeminiEngine):
                  forecast_resolution_in_minute: int = 60,
                  num_of_horizons: int = 24,
                  forecast_lead_time_in_hour: int = 12,
-                 us_state: str = 'Texas') -> None:
+                 us_state: str = 'Texas'
+                 ) -> None:
         """
         Prepare to train scenario generation models by first computing delay
         times for transitional hours at sunrises and sunsets, and then
