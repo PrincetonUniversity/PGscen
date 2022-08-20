@@ -22,13 +22,15 @@ from .engine import GeminiEngine, SolarGeminiEngine
 from .pca import PCAGeminiEngine, PCAGeminiModel
 from .scoring import compute_energy_scores, compute_variograms
 
+from joblib import Parallel, delayed
+
 # define common command-line arguments across all tools
 parent_parser = argparse.ArgumentParser(add_help=False)
 
 parent_parser.add_argument(
     'start', type=str,
     help="start date for the scenarios, given in YYYY-MM-DD format"
-    )
+)
 parent_parser.add_argument(
     'days', type=int, help="for how many days to create scenarios for")
 
@@ -142,11 +144,25 @@ def create_solar_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-solar', parents=[parent_parser],
         description="Create day ahead solar scenarios."
-        ).parse_args()
+    ).parse_args()
 
     scen_generator = T7kScenarioGenerator(args)
-    scen_generator.produce_scenarios(create_solar=True)
-
+    if args.tuning == '':
+        scen_generator.produce_scenarios(create_solar=True)
+    elif args.tuning == 'rhos':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_solar=True, asset_rho=asset_rho, time_rho=time_rho)
+            for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
+    elif args.tuning == 'components':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_solar=True,
+                                                             components=components)
+            for components in args.tuning_list_1)
+    elif args.tuning == 'distance_measure':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_solar=True,
+                                                             dist_meas=dist_meas)
+            for dist_meas in args.dist_meas_list)
 
 def create_load_solar_scenarios():
     args = argparse.ArgumentParser(
@@ -171,13 +187,40 @@ def create_scenarios():
     args = parser.parse_args()
     scen_generator = T7kScenarioGenerator(args)
 
+
     if args.joint:
         scen_generator.produce_scenarios(create_wind=True,
                                          create_load_solar=True)
     else:
-        scen_generator.produce_scenarios(create_load=True, create_wind=True)
-        scen_generator.produce_scenarios(create_solar=True)
+        if args.tuning == '':
+            scen_generator.produce_scenarios(create_load=True, create_wind=True, create_solar=True)
 
+        elif args.tuning == 'rhos':
+            Parallel(n_jobs=31, verbose=-1)(
+                delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
+                                                                 create_solar=True, asset_rho=asset_rho,
+                                                                 time_rho=time_rho)
+                for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
+        # distance measure is only used for solar and load scenarios
+        elif args.tuning == 'distance_measure':
+            Parallel(n_jobs=31, verbose=-1)(
+                delayed(scen_generator.produce_scenarios_tuning)(create_load=False, create_wind=True,
+                                                                 create_solar=True, dist_meas=dist_meas)
+                for dist_meas in args.dist_meas_list)
+        # neraest days is only used in the solar scenarios
+        elif args.tuning == 'nearest_days':
+            Parallel(n_jobs=31, verbose=-1)(
+                delayed(scen_generator.produce_scenarios_tuning)(create_load=False, create_wind=False,
+                                                                 create_solar=True, nearest_days=nearest_days)
+                for nearest_days in args.tuning_list_1)
+        # wind specific is only used in the wind scenarios
+        elif args.tuning == 'load_specific':
+            Parallel(n_jobs=31, verbose=-1)(
+                delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=False,
+                                                                 create_solar=False,
+                                                                 bin_width_ratio=bin_width_ratio,
+                                                                 min_sample_size=int(min_sample_size))
+                for bin_width_ratio in args.tuning_list_1 for min_sample_size in args.tuning_list_2)
 
 # tools for creating scenarios using Principal Component Analysis time-features
 def create_pca_solar_scenarios():

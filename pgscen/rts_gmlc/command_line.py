@@ -89,7 +89,10 @@ def create_pca_solar_scenarios():
     ).parse_args()
 
     scen_generator = RtsPCAScenarioGenerator(args)
-    if args.tuning == 'rhos':
+
+    if args.tuning == '':
+        scen_generator.produce_scenarios(create_solar=True)
+    elif args.tuning == 'rhos':
         Parallel(n_jobs=31, verbose=-1)(
             delayed(scen_generator.produce_scenarios_tuning)(create_solar=True, asset_rho=asset_rho, time_rho=time_rho)
             for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
