@@ -111,7 +111,7 @@ joint_parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
 joint_pca_parser = argparse.ArgumentParser(parents=[pca_parser],
                                            add_help=False)
 
-for prs in (joint_parser, joint_pca_parser):
+for prs in (joint_parser, joint_pca_parser, pca_parser):
     prs.add_argument('--use-all-load-history',
                      action='store_true', dest='use_all_load_hist',
                      help="train load models using all out-of-sample "
@@ -193,7 +193,8 @@ def create_scenarios():
                                          create_load_solar=True)
     else:
         if args.tuning == '':
-            scen_generator.produce_scenarios(create_load=True, create_wind=True, create_solar=True)
+            scen_generator.produce_scenarios(create_load=True, create_wind=True)
+            scen_generator.produce_scenarios(create_solar=True)
 
         elif args.tuning == 'rhos':
             Parallel(n_jobs=31, verbose=-1)(
@@ -282,7 +283,6 @@ class ScenarioGenerator(ABC):
         self.bin_width_ratio = args.bin_width_ratio
         self.min_sample_size = args.min_sample_size
         self.use_all_load_hist = args.use_all_load_hist
-
         self.output_dir = args.out_dir
         self.write_csv = not args.pickle
         self.skip_existing = args.skip_existing
@@ -656,7 +656,6 @@ class T7kScenarioGenerator(ScenarioGenerator):
 
     def produce_solar_scenarios(
             self, scen_timesteps: pd.DatetimeIndex) -> SolarGeminiEngine:
-
         if self.actuals['solar'] is None:
             (self.actuals['solar'], self.forecasts['solar'],
                 self.metadata['solar']) = load_solar_data()
@@ -746,8 +745,7 @@ class T7kPCAScenarioGenerator(PCAScenarioGenerator, T7kScenarioGenerator):
         solar_engn = PCAGeminiEngine(solar_site_actual_hists,
                                      solar_site_forecast_hists,
                                      scen_timesteps[0], self.metadata['solar'],
-                                     us_state=self.us_state,
-                                     dist_meas=self.dist_meas)
+                                     us_state=self.us_state)
 
         norm_dist, _ = solar_engn.asset_distance(self.dist_meas)
         solar_engn.fit(asset_rho=2 * self.asset_rho * norm_dist,
