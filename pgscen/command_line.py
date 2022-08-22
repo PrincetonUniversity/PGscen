@@ -223,22 +223,35 @@ def create_scenarios():
                                                                  min_sample_size=int(min_sample_size))
                 for bin_width_ratio in args.tuning_list_1 for min_sample_size in args.tuning_list_2)
 
+
 # tools for creating scenarios using Principal Component Analysis time-features
 def create_pca_solar_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-pca-solar', parents=[pca_parser],
         description="Create day ahead solar scenarios using PCA features."
-        ).parse_args()
+    ).parse_args()
 
     scen_generator = T7kPCAScenarioGenerator(args)
-    scen_generator.produce_scenarios(create_solar=True)
+
+    if args.tuning == '':
+        scen_generator.produce_scenarios(create_solar=True)
+    elif args.tuning == 'rhos':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_solar=True, asset_rho=asset_rho,
+                                                             time_rho=time_rho)
+            for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
+    elif args.tuning == 'components':
+        Parallel(n_jobs=31, verbose=-1)(
+            delayed(scen_generator.produce_scenarios_tuning)(create_solar=True,
+                                                             components=components)
+            for components in args.tuning_list_1)
 
 
 def create_pca_load_solar_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-pca-load-solar', parents=[joint_pca_parser],
         description="Create day ahead load-solar jointly modeled scenarios."
-        ).parse_args()
+    ).parse_args()
 
     scen_generator = T7kPCAScenarioGenerator(args)
     scen_generator.produce_scenarios(create_load_solar=True)
