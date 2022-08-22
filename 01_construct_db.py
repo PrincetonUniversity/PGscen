@@ -44,12 +44,14 @@ def main():
 
     # add arguments to parser for different tuning types
     parser.add_argument('--tuning', type=str, default='', dest='tuning',
-                        choices=['rhos', 'nearest_days', 'load_specific', 'components'],
+                        choices=['rhos', 'nearest_days', 'load_specific', 'components', 'distance_measure'],
                         help='string to indicate the tuning type')
     parser.add_argument('--tuning-list-1', action="extend", nargs="+", type=float,
                         dest='tuning_list_1', help='the list of tuning param 1')
     parser.add_argument('--tuning-list-2', action="extend", nargs="+", type=float,
                         dest='tuning_list_2', help='the list of tuning param 2')
+    parser.add_argument('--distance-measure-list', action="extend", nargs="+", type=str,
+                        dest='dist_meas_list', help='the list of distance measures')
 
     args = parser.parse_args()
 
@@ -71,6 +73,16 @@ def main():
                     delayed(merge_output_scores_files)(args.inp_dir, args.out_dir, args.tuning, param1,
                                                        param2) for param1 in
                     args.tuning_list_1 for param2 in args.tuning_list_2)
+        elif args.tuning == 'distance_measure':
+            if args.data_type == 'Scenario':
+                Parallel(n_jobs=31, verbose=-1)(
+                    delayed(merge_output_scenarios_files_daily)(args.inp_dir, args.out_dir, args.energy_type,
+                                                                args.tuning, param1) for param1 in
+                    args.dist_meas_list)
+            else:
+                Parallel(n_jobs=31, verbose=-1)(
+                    delayed(merge_output_scores_files)(args.inp_dir, args.out_dir, args.tuning, param1) for param1 in
+                    args.dist_meas_list)
         else:
             if args.data_type == 'Scenario':
                 Parallel(n_jobs=31, verbose=-1)(
