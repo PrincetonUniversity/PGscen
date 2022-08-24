@@ -46,25 +46,25 @@ def create_scenarios():
         scen_generator.produce_scenarios(create_load=True, create_wind=True,
                                          create_solar=True)
     elif args.tuning == 'rhos':
-        Parallel(n_jobs=31, verbose=-1)(
+        Parallel(n_jobs=-1, verbose=-1)(
             delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=True,
                                                              create_solar=True, asset_rho=asset_rho, time_rho=time_rho)
             for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
     # distance measure is only used for solar and load scenarios
     elif args.tuning == 'distance_measure':
-        Parallel(n_jobs=31, verbose=-1)(
+        Parallel(n_jobs=-1, verbose=-1)(
             delayed(scen_generator.produce_scenarios_tuning)(create_load=False, create_wind=True,
                                                              create_solar=True, dist_meas=dist_meas)
             for dist_meas in args.dist_meas_list)
     # neraest days is only used in the solar scenarios
     elif args.tuning == 'nearest_days':
-        Parallel(n_jobs=31, verbose=-1)(
+        Parallel(n_jobs=-1, verbose=-1)(
             delayed(scen_generator.produce_scenarios_tuning)(create_load=False, create_wind=False,
                                                              create_solar=True, nearest_days=nearest_days)
             for nearest_days in args.tuning_list_1)
     # wind specific is only used in the wind scenarios
     elif args.tuning == 'load_specific':
-        Parallel(n_jobs=31, verbose=-1)(
+        Parallel(n_jobs=-1, verbose=-1)(
             delayed(scen_generator.produce_scenarios_tuning)(create_load=True, create_wind=False,
                                                              create_solar=False,
                                                              bin_width_ratio=bin_width_ratio,
@@ -93,16 +93,16 @@ def create_pca_solar_scenarios():
     if args.tuning == '':
         scen_generator.produce_scenarios(create_solar=True)
     elif args.tuning == 'rhos':
-        Parallel(n_jobs=31, verbose=-1)(
+        Parallel(n_jobs=-1, verbose=-1)(
             delayed(scen_generator.produce_scenarios_tuning)(create_solar=True, asset_rho=asset_rho, time_rho=time_rho)
             for asset_rho in args.tuning_list_1 for time_rho in args.tuning_list_2)
     elif args.tuning == 'components':
-        Parallel(n_jobs=31, verbose=-1)(
+        Parallel(n_jobs=-1, verbose=-1)(
             delayed(scen_generator.produce_scenarios_tuning)(create_solar=True,
                                                              components=components)
             for components in args.tuning_list_1)
     elif args.tuning == 'distance_measure':
-        Parallel(n_jobs=31, verbose=-1)(
+        Parallel(n_jobs=-1, verbose=-1)(
             delayed(scen_generator.produce_scenarios_tuning)(create_solar=True,
                                                              dist_meas=dist_meas)
             for dist_meas in args.dist_meas_list)
