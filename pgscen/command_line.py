@@ -93,7 +93,7 @@ parent_parser.add_argument('--test', action='store_true')
 parent_parser.add_argument('--tuning', type=str, default='', dest='tuning',
                            choices=['rhos', 'nearest_days', 'load_specific', 'components', 'distance_measure'],
                            help='string to indicate the tuning type')
-parent_parser.add_argument('--ncores', type=float, default=-1, dest='ncores',
+parent_parser.add_argument('--ncores', type=int, default=-1, dest='ncores',
                            help='the number of cores for the parallelizaton')
 parent_parser.add_argument('--tuning-list-1', action="extend", nargs="+", type=float,
                            dest='tuning_list_1', help='the list of tuning param 1')
