@@ -99,7 +99,11 @@ parent_parser.add_argument('--tuning-list-1', action="extend", nargs="+", type=f
                            dest='tuning_list_1', help='the list of tuning param 1')
 parent_parser.add_argument('--tuning-list-2', action="extend", nargs="+", type=float,
                            dest='tuning_list_2', help='the list of tuning param 2')
-
+parent_parser.add_argument('--use-all-load-history',
+                           action='store_true', dest='use_all_load_hist',
+                           help="train load models using all out-of-sample "
+                                "historical days instead of the same "
+                                "window used for solar models")
 test_path = Path(Path(__file__).parent.parent, 'test', 'resources')
 
 pca_parser = argparse.ArgumentParser(add_help=False, parents=[parent_parser])
@@ -112,13 +116,6 @@ pca_parser.add_argument(
 joint_parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
 joint_pca_parser = argparse.ArgumentParser(parents=[pca_parser],
                                            add_help=False)
-
-for prs in (joint_parser, joint_pca_parser, pca_parser):
-    prs.add_argument('--use-all-load-history',
-                     action='store_true', dest='use_all_load_hist',
-                     help="train load models using all out-of-sample "
-                          "historical days instead of the same "
-                          "window used for solar models")
 
 
 # tools for creating a particular type of scenario

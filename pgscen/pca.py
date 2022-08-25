@@ -25,7 +25,8 @@ class PCAGeminiEngine(GeminiEngine):
                  forecast_resolution_in_minute: int = 60,
                  num_of_horizons: int = 24,
                  forecast_lead_time_in_hour: int = 12,
-                 us_state: str = 'Texas'
+                 us_state: str = 'Texas',
+                 dist_meas: str = 'Euclidean'
                  ) -> None:
         """
         Prepare to train scenario generation models by first computing delay
@@ -36,7 +37,7 @@ class PCAGeminiEngine(GeminiEngine):
         super().__init__(solar_hist_actual_df, solar_hist_forecast_df,
                          scen_start_time, solar_meta_df, 'solar',
                          forecast_resolution_in_minute, num_of_horizons,
-                         forecast_lead_time_in_hour, us_state)
+                         forecast_lead_time_in_hour, us_state, dist_meas)
 
         # attributes for joint load-solar models
         self.load_md = None

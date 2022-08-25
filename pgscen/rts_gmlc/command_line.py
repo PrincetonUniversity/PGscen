@@ -26,12 +26,6 @@ joint_parser = argparse.ArgumentParser(parents=[rts_parser], add_help=False)
 joint_pca_parser = argparse.ArgumentParser(parents=[rts_pca_parser],
                                            add_help=False)
 
-for parser in (rts_parser, rts_pca_parser, joint_parser, joint_pca_parser):
-    parser.add_argument('--use-all-load-history',
-                        action='store_true', dest='use_all_load_hist',
-                        help="train load models using all out-of-sample "
-                             "historical days instead of the same "
-                             "window used for solar models")
 
 
 # TODO: RTS solar models seem to be numerically unstable — why?
