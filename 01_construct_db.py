@@ -190,6 +190,8 @@ def merge_output_scores_files(input_dir, output_dir, tuning='', param1='', param
     # ending string and add it to input dir
     if tuning != '':
         if tuning == 'rhos' or tuning == 'load_specific':
+            if tuning == 'load_specific':
+                param2 = int(param2)
             ending_str = tuning + '_' + str(param1) + '_' + str(param2)
         else:
             ending_str = tuning + '_' + str(param1)

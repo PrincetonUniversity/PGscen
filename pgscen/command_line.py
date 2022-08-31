@@ -67,7 +67,7 @@ parent_parser.add_argument('--distance-measure-list', action="extend", nargs="+"
 
 parent_parser.add_argument('--bin-width-ratio', type=float,
                            default=0.1, dest='bin_width_ratio')
-parent_parser.add_argument('--min-sample-size', type=float,
+parent_parser.add_argument('--min-sample-size', type=int,
                            default=400, dest='min_sample_size')
 
 parent_parser.add_argument('--random-seed', type=int, dest='random_seed',
@@ -462,6 +462,7 @@ class ScenarioGenerator(ABC):
 
                 if self.tuning == '':
                     if self.write_csv:
+
                         scen_engine.write_to_csv(self.output_dir,
                                                  self.futures[asset_type],
                                                  write_forecasts=True)
