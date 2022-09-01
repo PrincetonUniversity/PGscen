@@ -66,7 +66,6 @@ def process_data_pgscen(assets_df):
     nobs = int(scenarios.shape[0])
     nassets = int(len(scenarios['asset_id'].unique()))
     nscenarios = int(nobs / nassets)
-    nhrs = int(scenarios.shape[1] - 1)
 
     scenarios['scen_id'] = np.tile(np.arange(nscenarios) + 1, nassets)
     scenarios = scenarios.set_index(['asset_id', 'scen_id'])
@@ -85,7 +84,7 @@ escores_load = pd.DataFrame()
 varios_solar = pd.DataFrame()
 varios_wind = pd.DataFrame()
 varios_load = pd.DataFrame()
-for data_date in zipfiles_list[0:2]:
+for data_date in zipfiles_list:
     print('---')
     print(data_date)
     date = data_date[-12:-4]
