@@ -192,8 +192,7 @@ def create_scenarios():
                                          create_load_solar=True)
     else:
         if args.tuning == '':
-            scen_generator.produce_scenarios(create_load=True, create_wind=True)
-            scen_generator.produce_scenarios(create_solar=True)
+            scen_generator.produce_scenarios(create_load=True, create_wind=True, create_solar=True)
 
         elif args.tuning == 'rhos':
             Parallel(n_jobs=args.ncores, verbose=-1)(

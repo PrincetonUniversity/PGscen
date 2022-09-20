@@ -154,7 +154,8 @@ def merge_output_scenarios_files_quarterly(input_dir, output_dir, n_jobs=30):
             delayed(output_file)(file, file_name, output_dir) for file, file_name in zip(outputs_list, files_name_list))
 
 
-def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, tuning='', param1='', param2='', n_jobs=31):
+def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, tuning='', param1='', param2='', n_jobs=31,
+                                       ending_str=''):
     # ending string
     if tuning != '':
         if tuning == 'rhos' or tuning == 'load_specific':
@@ -186,7 +187,7 @@ def merge_output_scenarios_files_daily(input_dir, output_dir, energy_type, tunin
             zip(panel_df_list, files_name_list))
 
 
-def merge_output_scores_files(input_dir, output_dir, tuning='', param1='', param2=''):
+def merge_output_scores_files(input_dir, output_dir, tuning='', param1='', param2='', ending_str=''):
     # ending string and add it to input dir
     if tuning != '':
         if tuning == 'rhos' or tuning == 'load_specific':
@@ -226,10 +227,12 @@ def merge_output_scores_files(input_dir, output_dir, tuning='', param1='', param
                                                           pd.Series(df[energy_type].dropna(), name=date)], axis=1)
 
         os.chdir(output_dir)
+        year = file.split('_')[1][:4]
         for energy_type, df in df_energy_types.items():
             if df.shape[0] != 0:
                 df = df.reset_index().rename(columns={'index': energy_type.lower()}).sort_values([energy_type.lower()])
-                df.to_csv(scores + '_' + energy_type.lower() + '_2020_' + ending_str + '.csv.gz', index=False,
+                df.to_csv(scores + '_' + energy_type.lower() + '_' + '{}'.format(year) + '_' + ending_str + '.csv.gz',
+                          index=False,
                           compression='gzip')
 
 

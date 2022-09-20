@@ -74,9 +74,24 @@ def process_data_pgscen(assets_df):
     return scenarios, actuals, forecasts
 
 
-# Cal Scores
-os.chdir('/projects/PERFORM/TX_SolarWindLoad_20220427/CSV/DA')
+# List Zipfiles
+os.chdir('/projects/PERFORM/Glen_Scenarios/TX_SolarWindLoad_Current/CSV/DA')
 zipfiles_list = sorted(os.listdir())
+zipfiles_list = [i for i in zipfiles_list if i[-3:] == 'zip']
+
+# Check Invalid Zipfiles
+invalid_zipfiles_list = []
+for data_date in zipfiles_list:
+    try:
+        zip_ref = zipfile.ZipFile(data_date, "r")
+        zip_ref.close()
+    except zipfile.BadZipFile:
+        invalid_zipfiles_list.append(data_date)
+
+# Valid Zipfiles List
+valid_zipfiles_list = [file for file in zipfiles_list if file not in invalid_zipfiles_list]
+
+# Cal Scores
 escores_solar = pd.DataFrame()
 escores_wind = pd.DataFrame()
 escores_load = pd.DataFrame()
@@ -84,7 +99,8 @@ escores_load = pd.DataFrame()
 varios_solar = pd.DataFrame()
 varios_wind = pd.DataFrame()
 varios_load = pd.DataFrame()
-for data_date in zipfiles_list:
+
+for data_date in valid_zipfiles_list:
     print('---')
     print(data_date)
     date = data_date[-12:-4]
@@ -116,11 +132,12 @@ for data_date in zipfiles_list:
     zip_ref.close()
 
 # output scores files as new format
-escores_solar.reset_index().to_csv('escores_solar_2017_2018_glen.csv.gz', compression='gzip', index=False)
-varios_solar.reset_index().to_csv('varios_solar_2017_2018_glen.csv.gz', compression='gzip', index=False)
+os.chdir('/projects/PERFORM/Glen_Scenarios/scores')
+escores_solar.reset_index().to_csv('escores_solar_2017_2018_v090722.csv.gz', compression='gzip', index=False)
+varios_solar.reset_index().to_csv('varios_solar_2017_2018_v090722.csv.gz', compression='gzip', index=False)
 
-escores_wind.reset_index().to_csv('escores_wind_2017_2018_glen.csv.gz', compression='gzip', index=False)
-varios_wind.reset_index().to_csv('varios_wind_2017_2018_glen.csv.gz', compression='gzip', index=False)
+escores_wind.reset_index().to_csv('escores_wind_2017_2018_v090722.csv.gz', compression='gzip', index=False)
+varios_wind.reset_index().to_csv('varios_wind_2017_2018_v090722.csv.gz', compression='gzip', index=False)
 
-escores_load.reset_index().to_csv('escores_load_2017_2018_glen.csv.gz', compression='gzip', index=False)
-varios_load.reset_index().to_csv('varios_load_2017_2018_glen.csv.gz', compression='gzip', index=False)
+escores_load.reset_index().to_csv('escores_load_2017_2018_v090722.csv.gz', compression='gzip', index=False)
+varios_load.reset_index().to_csv('varios_load_2017_2018_v090722.csv.gz', compression='gzip', index=False)
