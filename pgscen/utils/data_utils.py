@@ -9,15 +9,15 @@ data_path = Path(Path(__file__).parent.parent.parent, 'data')
 def load_load_data():
     load_zone_actual_df = pd.read_csv(
         Path(data_path, 'Load', 'ERCOT', 'Actual',
-             'load_actual_1h_zone_2017_2018_utc.csv'),
+             'load_actual_1h_zone_2017_2018_utc_2hrahead.csv'),
         parse_dates=['Time'], index_col='Time'
-        )
+    )
 
     load_zone_forecast_df = pd.read_csv(
         Path(data_path, 'Load', 'ERCOT', 'Day-ahead',
-             'load_day_ahead_forecast_zone_2017_2018_utc.csv'),
+             'load_day_ahead_forecast_zone_2017_2018_utc_2hrahead.csv'),
         parse_dates=['Issue_time', 'Forecast_time']
-        )
+    )
 
     return load_zone_actual_df, load_zone_forecast_df
 
