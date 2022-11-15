@@ -1,3 +1,5 @@
+[![CI](https://github.com/PrincetonUniversity/PGscen/actions/workflows/main.yml/badge.svg)](https://github.com/PrincetonUniversity/PGscen/actions/workflows/main.yml)
+
 # PGscen #
 
 This package generates power grid scenarios using GEMINI trained on historical grid asset actual and forecasted values.
