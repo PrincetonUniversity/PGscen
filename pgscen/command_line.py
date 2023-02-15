@@ -15,10 +15,10 @@ import numpy as np
 import pandas as pd
 
 from .utils.data_utils import (load_load_data, load_wind_data, load_solar_data,
-                               split_actuals_hist_future,
-                               split_forecasts_hist_future)
+                               load_ny_load_data, load_ny_wind_data, load_ny_solar_data,
+                               split_actuals_hist_future, split_forecasts_hist_future)
 
-from .engine import GeminiEngine, SolarGeminiEngine
+from .engine import GeminiEngine
 from .pca import PCAGeminiEngine, PCAGeminiModel
 from .scoring import compute_energy_scores, compute_variograms
 
@@ -71,26 +71,25 @@ parent_parser.add_argument('--variograms', action='store_true',
 parent_parser.add_argument('--test', action='store_true')
 test_path = Path(Path(__file__).parent.parent, 'test', 'resources')
 
+
 pca_parser = argparse.ArgumentParser(add_help=False, parents=[parent_parser])
 pca_parser.add_argument(
-    '--components', '-c', type=str, default='0.99',
+    '--components', '-c', type=str, default='0.9',
     help="How many factors to use when fitting the PCA."
          "See sklearn.decomposition.PCA for possible argument values."
     )
 
-joint_parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
 joint_pca_parser = argparse.ArgumentParser(parents=[pca_parser],
                                            add_help=False)
 
-for prs in (joint_parser, joint_pca_parser):
-    prs.add_argument('--use-all-load-history',
-                     action='store_true', dest='use_all_load_hist',
-                     help="train load models using all out-of-sample "
-                          "historical days instead of the same "
-                          "window used for solar models")
+joint_pca_parser.add_argument('--use-all-load-history',
+                    action='store_true', dest='use_all_load_hist',
+                    help="train load models using all out-of-sample "
+                        "historical days instead of the same "
+                        "window used for solar models")
 
 
-# tools for creating a particular type of scenario
+# tools for creating a particular type of scenario for Texas-7k
 def create_load_scenarios():
     args = argparse.ArgumentParser(
         'pgscen-load', parents=[parent_parser],
@@ -110,11 +109,10 @@ def create_wind_scenarios():
     scen_generator = T7kScenarioGenerator(args)
     scen_generator.produce_scenarios(create_wind=True)
 
-
 def create_solar_scenarios():
     args = argparse.ArgumentParser(
-        'pgscen-solar', parents=[parent_parser],
-        description="Create day ahead solar scenarios."
+        'pgscen-solar', parents=[pca_parser],
+        description="Create day ahead solar scenarios using PCA features."
         ).parse_args()
 
     scen_generator = T7kScenarioGenerator(args)
@@ -123,18 +121,17 @@ def create_solar_scenarios():
 
 def create_load_solar_scenarios():
     args = argparse.ArgumentParser(
-        'pgscen-load-solar', parents=[joint_parser],
+        'pgscen-load-solar', parents=[joint_pca_parser],
         description="Create day ahead load-solar jointly modeled scenarios."
         ).parse_args()
 
     scen_generator = T7kScenarioGenerator(args)
     scen_generator.produce_scenarios(create_load_solar=True)
 
-
-# tool for creating all types of scenarios at the same time
 def create_scenarios():
+    """create all types of scenarios at the same time"""
     parser = argparse.ArgumentParser(
-        'pgscen', parents=[joint_parser],
+        'pgscen', parents=[joint_pca_parser],
         description="Create day-ahead t7k load, wind, and solar scenarios."
         )
 
@@ -146,51 +143,53 @@ def create_scenarios():
 
     if args.joint:
         scen_generator.produce_scenarios(create_wind=True,
-                                         create_load_solar=True)
+                                         create_load_solar=True,)
     else:
-        scen_generator.produce_scenarios(create_load=True, create_wind=True)
-        scen_generator.produce_scenarios(create_solar=True)
+        scen_generator.produce_scenarios(
+                create_load=True, create_wind=True, create_solar=True,)
 
 
-# tools for creating scenarios using Principal Component Analysis time-features
-def create_pca_solar_scenarios():
+# tools for creating a particular type of scenario for NYISO
+def create_ny_load_scenarios():
     args = argparse.ArgumentParser(
-        'pgscen-pca-solar', parents=[pca_parser],
+        'pgscen-ny-load', parents=[parent_parser],
+        description="Create day ahead load scenarios."
+        ).parse_args()
+
+    scen_generator = NYScenarioGenerator(args)
+    scen_generator.produce_scenarios(create_load=True)
+
+
+def create_ny_wind_scenarios():
+    args = argparse.ArgumentParser(
+        'pgscen-ny-wind', parents=[parent_parser],
+        description="Create day ahead wind scenarios."
+        ).parse_args()
+
+    scen_generator = NYScenarioGenerator(args)
+    scen_generator.produce_scenarios(create_wind=True)
+
+def create_ny_solar_scenarios():
+    args = argparse.ArgumentParser(
+        'pgscen-ny-solar', parents=[pca_parser],
         description="Create day ahead solar scenarios using PCA features."
         ).parse_args()
 
-    scen_generator = T7kPCAScenarioGenerator(args)
+    scen_generator = NYScenarioGenerator(args)
     scen_generator.produce_scenarios(create_solar=True)
 
-
-def create_pca_load_solar_scenarios():
-    args = argparse.ArgumentParser(
-        'pgscen-pca-load-solar', parents=[joint_pca_parser],
-        description="Create day ahead load-solar jointly modeled scenarios."
-        ).parse_args()
-
-    scen_generator = T7kPCAScenarioGenerator(args)
-    scen_generator.produce_scenarios(create_load_solar=True)
-
-
-def create_pca_scenarios():
+def create_ny_scenarios():
+    """create all types of scenarios at the same time"""
     parser = argparse.ArgumentParser(
-        'pgscen-pca', parents=[joint_pca_parser],
-        description="Create day-ahead t7k load, wind, and solar PCA scenarios."
+        'pgscen-ny', parents=[pca_parser],
+        description="Create day-ahead NYISO load, wind, and solar scenarios."
         )
 
-    parser.add_argument('--joint', action='store_true',
-                        help="use a joint load-solar model")
-
     args = parser.parse_args()
-    scen_generator = T7kPCAScenarioGenerator(args)
+    scen_generator = NYScenarioGenerator(args)
 
-    if args.joint:
-        scen_generator.produce_scenarios(create_wind=True,
-                                         create_load_solar=True)
-    else:
-        scen_generator.produce_scenarios(create_load=True, create_wind=True,
-                                         create_solar=True)
+    scen_generator.produce_scenarios(
+            create_load=True, create_wind=True, create_solar=True,)
 
 
 class ScenarioGenerator(ABC):
@@ -208,7 +207,6 @@ class ScenarioGenerator(ABC):
         self.asset_rho = args.asset_rho
         self.time_rho = args.time_rho
         self.nearest_days = args.nearest_days
-        self.use_all_load_hist = args.use_all_load_hist
 
         self.output_dir = args.out_dir
         self.write_csv = not args.pickle
@@ -219,6 +217,23 @@ class ScenarioGenerator(ABC):
 
         self.energy_scores = args.energy_scores
         self.variograms = args.variograms
+
+        if hasattr(args, 'use_all_load_hist'):
+            self.use_all_load_hist = args.use_all_load_hist
+
+        if hasattr(args, 'components'):
+            if args.components.isdigit() and args.components != '0':
+                self.components = int(args.components)
+
+            elif args.components[:2] == '0.' and args.components[2:].isdigit():
+                self.components = float(args.components)
+            elif args.components[0] == '.' and args.components[1:].isdigit():
+                self.components = float(args.components)
+
+            elif args.components != 'mle':
+                raise ValueError("Invalid <components> value of `{}`! See "
+                                "sklearn.decomposition.PCA for accepted argument "
+                                "values.".format(self.components))
 
         self.actuals = {'load': None, 'wind': None, 'solar': None}
         self.forecasts = {'load': None, 'wind': None, 'solar': None}
@@ -237,11 +252,8 @@ class ScenarioGenerator(ABC):
                 out_path = Path(self.output_dir,
                                 daily_start_time.strftime('%Y%m%d'))
 
-                if out_path.exists():
-                    if self.skip_existing:
-                        continue
-                    else:
-                        shutil.rmtree(out_path)
+                if out_path.exists() and not self.skip_existing:
+                    shutil.rmtree(out_path)
 
             else:
                 out_path = Path(self.output_dir,
@@ -261,7 +273,21 @@ class ScenarioGenerator(ABC):
 
     def daily_message(self, scen_engines: Dict[str, GeminiEngine]) -> None:
         """Logging info about the scenario models fit for a given day."""
-        pass
+
+        for asset_type in scen_engines:
+            if asset_type in ('load', 'wind'):
+                pass
+            else:
+                if asset_type == 'solar':
+                    use_model = scen_engines['solar'].model 
+                else:
+                    scen_engines['joint'].solar_md
+
+                if self.verbosity >= 2:
+                    print("Used {} PCA components which explained "
+                        "{:.2%} of the variance in the solar "
+                        "training data.".format(use_model.num_of_components,
+                                                1 - use_model.pca_residual))
 
     def produce_scenarios(self,
                           create_load: bool = False, create_wind: bool = False,
@@ -299,9 +325,8 @@ class ScenarioGenerator(ABC):
                     scen_timesteps)
 
             if create_load_solar:
-                scen_engines['load'] = self.produce_load_solar_scenarios(
-                    scen_timesteps)
-                scen_engines['solar'] = scen_engines['load']
+                scen_engines['joint'] = self.produce_load_solar_scenarios(
+                        scen_timesteps)
 
             for asset_type, scen_engine in scen_engines.items():
                 asset_lbl = asset_type.capitalize()
@@ -319,9 +344,12 @@ class ScenarioGenerator(ABC):
                         )
 
                 if self.write_csv:
-                    scen_engine.write_to_csv(self.output_dir,
-                                             self.futures[asset_type],
-                                             write_forecasts=True)
+                    if asset_type == 'joint':
+                        scen_engine.write_to_csv(
+                            self.output_dir, self.futures, write_forecasts=True)
+                    else:
+                        scen_engine.write_to_csv(
+                            self.output_dir, self.futures[asset_type], write_forecasts=True)
                 else:
                     out_scens[asset_type.capitalize()] = scen_engine.scenarios[
                         asset_type].round(4)
@@ -386,50 +414,6 @@ class ScenarioGenerator(ABC):
 
     @abstractmethod
     def produce_solar_scenarios(
-            self, scen_timesteps: pd.DatetimeIndex) -> SolarGeminiEngine:
-        pass
-
-    @abstractmethod
-    def produce_load_solar_scenarios(
-            self, scen_timesteps: pd.DatetimeIndex) -> SolarGeminiEngine:
-        pass
-
-
-class PCAScenarioGenerator(ScenarioGenerator, ABC):
-    """Abstract class for creating PCA solar scenarios via command-line."""
-
-    def __init__(self, args: argparse.Namespace) -> None:
-        if args.components.isdigit() and args.components != '0':
-            self.components = int(args.components)
-
-        elif args.components[:2] == '0.' and args.components[2:].isdigit():
-            self.components = float(args.components)
-        elif args.components[0] == '.' and args.components[1:].isdigit():
-            self.components = float(args.components)
-
-        elif args.components != 'mle':
-            raise ValueError("Invalid <components> value of `{}`! See "
-                             "sklearn.decomposition.PCA for accepted argument "
-                             "values.".format(self.components))
-
-        super().__init__(args)
-
-    def daily_message(self, scen_engines: Dict[str, GeminiEngine]) -> None:
-        """Prints how much of the solar variance the PCA model explained."""
-
-        if isinstance(scen_engines['solar'].model, PCAGeminiModel):
-            use_model = scen_engines['solar'].model
-        else:
-            use_model = scen_engines['solar'].solar_md
-
-        if self.verbosity >= 2 and 'solar' in scen_engines:
-            print("Used {} PCA components which explained "
-                  "{:.2%} of the variance in the solar "
-                  "training data.".format(use_model.num_of_components,
-                                          1 - use_model.pca_residual))
-
-    @abstractmethod
-    def produce_solar_scenarios(
             self, scen_timesteps: pd.DatetimeIndex) -> PCAGeminiEngine:
         pass
 
@@ -437,7 +421,6 @@ class PCAScenarioGenerator(ScenarioGenerator, ABC):
     def produce_load_solar_scenarios(
             self, scen_timesteps: pd.DatetimeIndex) -> PCAGeminiEngine:
         pass
-
 
 class T7kScenarioGenerator(ScenarioGenerator):
     """Class used by command-line tools for creating Texas-7k scenarios."""
@@ -467,8 +450,7 @@ class T7kScenarioGenerator(ScenarioGenerator):
 
         load_engn.fit(self.asset_rho, self.time_rho)
         load_engn.create_scenario(self.scen_count,
-                                  load_zone_forecast_futures,
-                                  bin_width_ratio=0.1, min_sample_size=400)
+                                  load_zone_forecast_futures,)
 
         return load_engn
 
@@ -498,7 +480,7 @@ class T7kScenarioGenerator(ScenarioGenerator):
         return wind_engn
 
     def produce_solar_scenarios(
-            self, scen_timesteps: pd.DatetimeIndex) -> SolarGeminiEngine:
+            self, scen_timesteps: pd.DatetimeIndex) -> PCAGeminiEngine:
 
         if self.actuals['solar'] is None:
             (self.actuals['solar'], self.forecasts['solar'],
@@ -511,19 +493,24 @@ class T7kScenarioGenerator(ScenarioGenerator):
             solar_site_forecast_futures) = split_forecasts_hist_future(
                     self.forecasts['solar'], scen_timesteps, in_sample=False)
 
-        solar_engn = SolarGeminiEngine(
+        solar_engn = PCAGeminiEngine(
             solar_site_actual_hists, solar_site_forecast_hists,
             scen_timesteps[0], self.metadata['solar'], us_state=self.us_state
             )
 
-        solar_engn.fit_solar_model(nearest_days=self.nearest_days)
-        solar_engn.create_solar_scenario(self.scen_count,
-                                         solar_site_forecast_futures)
+        dist = solar_engn.asset_distance().values
+        solar_engn.fit(asset_rho = 20 * self.asset_rho * dist / dist.max(), 
+            pca_comp_rho = self.time_rho,
+            num_of_components = self.components,
+            nearest_days = self.nearest_days,
+            )
+        solar_engn.create_scenario(self.scen_count, 
+                                solar_site_forecast_futures)
 
         return solar_engn
 
     def produce_load_solar_scenarios(
-            self, scen_timesteps: pd.DatetimeIndex) -> SolarGeminiEngine:
+            self, scen_timesteps: pd.DatetimeIndex) -> PCAGeminiEngine:
 
         if self.actuals['load'] is None:
             self.actuals['load'], self.forecasts['load'] = load_load_data()
@@ -548,15 +535,19 @@ class T7kScenarioGenerator(ScenarioGenerator):
             solar_site_forecast_futures) = split_forecasts_hist_future(
                     self.forecasts['solar'], scen_timesteps, in_sample=False)
 
-        solar_engn = SolarGeminiEngine(
+        solar_engn = PCAGeminiEngine(
             solar_site_actual_hists, solar_site_forecast_hists,
             scen_timesteps[0], self.metadata['solar'], us_state=self.us_state
             )
-
+        
+        dist = solar_engn.asset_distance().values
         solar_engn.fit_load_solar_joint_model(
             load_zone_actual_hists, load_zone_forecast_hists,
-            nearest_days=self.nearest_days,
-            use_all_load_hist=self.use_all_load_hist
+            load_asset_rho = self.asset_rho, load_horizon_rho = self.time_rho,
+            solar_asset_rho = 20 * self.asset_rho * dist / dist.max(), 
+            solar_pca_comp_rho = self.time_rho, joint_asset_rho = self.asset_rho,
+            num_of_components = self.components, nearest_days = self.nearest_days,
+            use_all_load_hist = self.use_all_load_hist
             )
 
         solar_engn.create_load_solar_joint_scenario(
@@ -567,17 +558,69 @@ class T7kScenarioGenerator(ScenarioGenerator):
         return solar_engn
 
 
-class T7kPCAScenarioGenerator(PCAScenarioGenerator, T7kScenarioGenerator):
-    """Class used by command-line tools for creating Texas-7k PCA scenarios."""
+class NYScenarioGenerator(ScenarioGenerator):
+    """Class used by command-line tools for creating NYISO scenarios."""
 
-    scenario_label = "Texas-7k PCA"
+    scenario_label = "NYISO"
+    us_state = 'New York'
+    start_hour = '06:00:00'
+
+    def produce_load_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> GeminiEngine:
+
+        if self.actuals['load'] is None:
+            self.actuals['load'], self.forecasts['load'] = load_ny_load_data()
+
+        # split input datasets into training and testing subsets
+        # for RTS we always do in-sample since we only have a year of data
+        (load_zone_actual_hists,
+            self.futures['load']) = split_actuals_hist_future(
+                    self.actuals['load'], scen_timesteps, in_sample=False)
+        (load_zone_forecast_hists,
+            load_zone_forecast_futures) = split_forecasts_hist_future(
+                    self.forecasts['load'], scen_timesteps, in_sample=False)
+
+        load_engn = GeminiEngine(load_zone_actual_hists,
+                                 load_zone_forecast_hists,
+                                 scen_timesteps[0], asset_type='load')
+
+        load_engn.fit(self.asset_rho, self.time_rho)
+        load_engn.create_scenario(self.scen_count,
+                                  load_zone_forecast_futures,)
+
+        return load_engn
+
+    def produce_wind_scenarios(
+            self, scen_timesteps: pd.DatetimeIndex) -> GeminiEngine:
+
+        if self.actuals['wind'] is None:
+            (self.actuals['wind'], self.forecasts['wind'],
+                self.metadata['wind']) = load_ny_wind_data()
+
+        (wind_site_actual_hists,
+            self.futures['wind']) = split_actuals_hist_future(
+                    self.actuals['wind'], scen_timesteps, in_sample=True)
+        (wind_site_forecast_hists,
+            wind_site_forecast_futures) = split_forecasts_hist_future(
+                    self.forecasts['wind'], scen_timesteps, in_sample=True)
+
+        wind_engn = GeminiEngine(
+            wind_site_actual_hists, wind_site_forecast_hists,
+            scen_timesteps[0], self.metadata['wind'], asset_type='wind'
+            )
+
+        dist = wind_engn.asset_distance().values
+        wind_engn.fit(2 * self.asset_rho * dist / dist.max(), self.time_rho)
+        wind_engn.create_scenario(self.scen_count, wind_site_forecast_futures)
+
+        return wind_engn
 
     def produce_solar_scenarios(
             self, scen_timesteps: pd.DatetimeIndex) -> PCAGeminiEngine:
 
         if self.actuals['solar'] is None:
             (self.actuals['solar'], self.forecasts['solar'],
-                self.metadata['solar']) = load_solar_data()
+                self.metadata['solar']) = load_ny_solar_data()
 
         (solar_site_actual_hists,
             self.futures['solar']) = split_actuals_hist_future(
@@ -586,69 +629,22 @@ class T7kPCAScenarioGenerator(PCAScenarioGenerator, T7kScenarioGenerator):
             solar_site_forecast_futures) = split_forecasts_hist_future(
                     self.forecasts['solar'], scen_timesteps, in_sample=False)
 
-        solar_engn = PCAGeminiEngine(solar_site_actual_hists,
-                                     solar_site_forecast_hists,
-                                     scen_timesteps[0], self.metadata['solar'],
-                                     us_state=self.us_state)
-        dist = solar_engn.asset_distance().values
+        solar_engn = PCAGeminiEngine(
+            solar_site_actual_hists, solar_site_forecast_hists,
+            scen_timesteps[0], self.metadata['solar'], us_state=self.us_state
+            )
 
-        solar_engn.fit(asset_rho=2 * self.asset_rho * dist / dist.max(),
-                       pca_comp_rho=self.time_rho,
-                       num_of_components=self.components,
-                       nearest_days=self.nearest_days)
-        solar_engn.create_scenario(self.scen_count,
-                                   solar_site_forecast_futures)
+        dist = solar_engn.asset_distance().values
+        solar_engn.fit(asset_rho = 20 * self.asset_rho * dist / dist.max(), 
+            pca_comp_rho = self.time_rho,
+            num_of_components = self.components,
+            nearest_days = self.nearest_days,
+            )
+        solar_engn.create_scenario(self.scen_count, 
+                                solar_site_forecast_futures)
 
         return solar_engn
 
     def produce_load_solar_scenarios(
             self, scen_timesteps: pd.DatetimeIndex) -> PCAGeminiEngine:
-
-        if self.actuals['load'] is None:
-            self.actuals['load'], self.forecasts['load'] = load_load_data()
-
-        if self.actuals['solar'] is None:
-            (self.actuals['solar'], self.forecasts['solar'],
-                self.metadata['solar']) = load_solar_data()
-
-        # split input datasets into training and testing subsets
-        # for RTS we always do in-sample since we only have a year of data
-        (load_zone_actual_hists,
-            self.futures['load']) = split_actuals_hist_future(
-                    self.actuals['load'], scen_timesteps, in_sample=False)
-        (load_zone_forecast_hists,
-            load_zone_forecast_futures) = split_forecasts_hist_future(
-                    self.forecasts['load'], scen_timesteps, in_sample=False)
-
-        (solar_site_actual_hists,
-            self.futures['solar']) = split_actuals_hist_future(
-                    self.actuals['solar'], scen_timesteps, in_sample=False)
-        (solar_site_forecast_hists,
-            solar_site_forecast_futures) = split_forecasts_hist_future(
-                    self.forecasts['solar'], scen_timesteps, in_sample=False)
-
-        solar_engn = PCAGeminiEngine(solar_site_actual_hists,
-                                     solar_site_forecast_hists,
-                                     scen_timesteps[0], self.metadata['solar'],
-                                     us_state=self.us_state)
-
-        dist = solar_engn.asset_distance().values
-        solar_asset_rho = 2 * self.asset_rho * dist / dist.max()
-
-        #TODO: double-check these regularization parametrizations
-        solar_engn.fit_load_solar_joint_model(
-            load_hist_actual_df=load_zone_actual_hists,
-            load_hist_forecast_df=load_zone_forecast_hists,
-            load_asset_rho=self.asset_rho, load_horizon_rho=self.time_rho,
-            solar_asset_rho=solar_asset_rho, solar_pca_comp_rho=self.time_rho,
-            joint_asset_rho=self.asset_rho, num_of_components=self.components,
-            nearest_days=self.nearest_days,
-            use_all_load_hist=self.use_all_load_hist
-            )
-
-        solar_engn.create_load_solar_joint_scenario(
-            self.scen_count,
-            load_zone_forecast_futures, solar_site_forecast_futures
-            )
-
-        return solar_engn
+        pass

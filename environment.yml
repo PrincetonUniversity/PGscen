@@ -1,3 +1,4 @@
+name: pgscen
 channels:
   - conda-forge
 dependencies:
