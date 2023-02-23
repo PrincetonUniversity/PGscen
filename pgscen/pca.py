@@ -18,13 +18,6 @@ from .utils.solar_utils import get_asset_transition_hour_info
 
 class PCAGeminiEngine(GeminiEngine):
 
-        #     time_shift: int
-        #     How many hours these assets' location time zone differs from UTC.
-        # us_state: str
-        #     Which US state the assets are located in. The values supported
-        #     currently are "Texas" for the default ERCOT/NREL datasets and
-        #     "California" for RTS-GMLC.
-
     def __init__(self,
                  solar_hist_actual_df: pd.DataFrame,
                  solar_hist_forecast_df: pd.DataFrame,

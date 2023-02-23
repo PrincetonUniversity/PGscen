@@ -75,11 +75,11 @@ def fit_gpd(data: np.array) -> Union[GPD, PGscenECDF]:
             return Rsafd.fit_gpd(robjects.FloatVector(data),
                                     tail='right', plot=False)
         else:
+            warnings.warn(f'no tail has been detected, using ECDF instead', RuntimeWarning)
             return PGscenECDF(data)
         
     except:
-        warnings.warn(f'tail has been detected, but unable to fit '
-                          f'GPD, using ECDF instead', RuntimeWarning)
+        warnings.warn(f'unable to fit GPD, using ECDF instead', RuntimeWarning)
         return PGscenECDF(data)
 
 def qdist(dist: Union[GPD, PGscenECDF], x: np.array, gpd_max_extension: float=0.15) -> np.array:
@@ -132,12 +132,18 @@ def gaussianize(df: pd.DataFrame, gpd: bool = False) -> Tuple[dict, pd.DataFrame
 
         if gpd:
             dist_dict[col] = fit_gpd(data)
-            unif_df[col] = np.array(Rsafd.pgpd(
-                dist_dict[col], robjects.FloatVector(data)))
         else:
             dist_dict[col] = PGscenECDF(data)
+
+        if tuple(dist_dict[col].rclass)[0][0:3] == 'gpd':
+            unif_df[col] = np.array(Rsafd.pgpd(
+                dist_dict[col], robjects.FloatVector(data)))
+        elif tuple(dist_dict[col].rclass)[0] == 'ecdf':
             unif_df[col] = np.array(
                 dist_dict[col].ecdf(robjects.FloatVector(data)))
+        else:
+            raise RuntimeError(
+                "Unrecognized distribution class {}".format(tuple(dist_dict[col].rclass)))
 
     unif_df.clip(lower=1e-5, upper=0.99999, inplace=True)
     gauss_df = unif_df.apply(norm.ppf)
