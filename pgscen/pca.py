@@ -158,7 +158,7 @@ class PCAGeminiEngine(GeminiEngine):
         # generating scenarios, adjusted for the observed output lag intervals
         asset_horizons = {
             asset: get_asset_transition_hour_info(
-                loc, self.scen_start_time.floor('D'),
+                loc, self.scen_start_time.floor('D').date(),
                 delay_dict[asset]['sunrise'], delay_dict[asset]['sunset']
                 )
             for asset, loc in asset_locs.items()
