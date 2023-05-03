@@ -37,13 +37,6 @@ setuptools.setup(
             'pgscen-ny=pgscen.command_line:create_ny_scenarios',
 
             'pgscen-rts=pgscen.rts_gmlc.command_line:create_scenarios',
-            'pgscen-rts-joint'
-            '=pgscen.rts_gmlc.command_line:create_joint_scenarios',
-            'pgscen-rts-pca-solar'
-            '=pgscen.rts_gmlc.command_line:create_pca_solar_scenarios',
-            'pgscen-rts-pca-load-solar'
-            '=pgscen.rts_gmlc.command_line:create_pca_load_solar_scenarios',
-            'pgscen-rts-pca=pgscen.rts_gmlc.command_line:create_pca_scenarios',
             ],
         },
 
