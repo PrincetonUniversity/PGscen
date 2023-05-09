@@ -31,19 +31,12 @@ setuptools.setup(
             '=pgscen.command_line:create_load_solar_scenarios',
             'pgscen=pgscen.command_line:create_scenarios',
 
-            'pgscen-pca-solar=pgscen.command_line:create_pca_solar_scenarios',
-            'pgscen-pca-load-solar'
-            '=pgscen.command_line:create_load_solar_scenarios',
-            'pgscen-pca=pgscen.command_line:create_pca_scenarios',
+            'pgscen-ny-load=pgscen.command_line:create_ny_load_scenarios',
+            'pgscen-ny-wind=pgscen.command_line:create_ny_wind_scenarios',
+            'pgscen-ny-solar=pgscen.command_line:create_ny_solar_scenarios',
+            'pgscen-ny=pgscen.command_line:create_ny_scenarios',
 
             'pgscen-rts=pgscen.rts_gmlc.command_line:create_scenarios',
-            'pgscen-rts-joint'
-            '=pgscen.rts_gmlc.command_line:create_joint_scenarios',
-            'pgscen-rts-pca-solar'
-            '=pgscen.rts_gmlc.command_line:create_pca_solar_scenarios',
-            'pgscen-rts-pca-load-solar'
-            '=pgscen.rts_gmlc.command_line:create_pca_load_solar_scenarios',
-            'pgscen-rts-pca=pgscen.rts_gmlc.command_line:create_pca_scenarios',
             ],
         },
 

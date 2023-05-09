@@ -35,7 +35,20 @@ class PCAGeminiEngine(GeminiEngine):
         super().__init__(solar_hist_actual_df, solar_hist_forecast_df,
                          scen_start_time, solar_meta_df, 'solar',
                          forecast_resolution_in_minute, num_of_horizons,
-                         forecast_lead_time_in_hour, us_state)
+                         forecast_lead_time_in_hour)
+
+        self.us_state = us_state
+
+        if self.us_state == 'Texas':
+            self.timezone = 'US/Central'
+        elif us_state == 'New York':
+            self.timezone = 'US/Eastern'
+        elif us_state == 'California':
+            self.timezone = 'US/Pacific'
+        else:
+            raise ValueError("The only US states currently supported are "
+                             "Texas, New York and California!")
+
 
         # attributes for joint load-solar models
         self.load_md = None
@@ -53,14 +66,14 @@ class PCAGeminiEngine(GeminiEngine):
                       'Actual', 'Forecast', 'Deviation', 'Active Minutes']
 
         asset_locs = {
-            asset: LocationInfo(asset, us_state, 'USA',
+            asset: LocationInfo(asset, self.us_state, self.timezone,
                                 asset_data.latitude, asset_data.longitude)
             for asset, asset_data in self.meta_df.iterrows()
             }
 
         # retrieve the actual and forecasted historical values for each solar
         # generator
-        for asset, actl_vals in solar_hist_actual_df.sort_index().iteritems():
+        for asset, actl_vals in solar_hist_actual_df.sort_index().items():
             fcst_vals = fcst_df[asset]
 
             sunrise_data, sunset_data = list(), list()
@@ -138,7 +151,7 @@ class PCAGeminiEngine(GeminiEngine):
         # generating scenarios, adjusted for the observed output lag intervals
         asset_horizons = {
             asset: get_asset_transition_hour_info(
-                loc, self.scen_start_time.floor('D'),
+                loc, self.scen_start_time.floor('D').date(),
                 delay_dict[asset]['sunrise'], delay_dict[asset]['sunset']
                 )
             for asset, loc in asset_locs.items()
@@ -153,7 +166,7 @@ class PCAGeminiEngine(GeminiEngine):
 
     def fit(self,
             asset_rho: float, pca_comp_rho: float,
-            num_of_components: Union[int, float, str] = 0.99,
+            num_of_components: Union[int, float, str] = 0.9,
             nearest_days: int = 50) -> None:
         """
         This function creates and fits a solar scenario model using historical
@@ -179,11 +192,8 @@ class PCAGeminiEngine(GeminiEngine):
         """
 
         if nearest_days:
-            days = self.get_yearly_date_range(use_date=self.scen_start_time,
+            dev_index = self.get_yearly_date_range(use_date=self.scen_start_time,
                                               num_of_days=nearest_days)
-            dev_index = [d + pd.Timedelta(self.time_shift, unit='H')
-                         for d in days]
-
         else:
             dev_index = None
 
@@ -228,18 +238,17 @@ class PCAGeminiEngine(GeminiEngine):
             load_asset_rho: float, load_horizon_rho: float,
             solar_asset_rho: float, solar_pca_comp_rho: float,
             joint_asset_rho: float,
-            num_of_components: Union[int, float, str] = 0.99,
+            num_of_components: Union[int, float, str] = 0.9,
             nearest_days: int = 50, use_all_load_hist: bool = False
             ) -> None:
 
         # Need to localize historical data?
-        days = self.get_yearly_date_range(use_date=self.scen_start_time,
+        dev_index = self.get_yearly_date_range(use_date=self.scen_start_time,
                                           num_of_days=nearest_days)
 
         # fit solar asset-level model
         solar_md = PCAGeminiModel(
-            self.scen_start_time, self.get_hist_df_dict(), None,
-            [d + pd.Timedelta(self.time_shift, unit='H') for d in days],
+            self.scen_start_time, self.get_hist_df_dict(), None, dev_index,
             self.forecast_resolution_in_minute, self.num_of_horizons,
             self.forecast_lead_hours
             )
@@ -415,8 +424,8 @@ class PCAGeminiEngine(GeminiEngine):
 
         # generate load scenarios conditioned on the joint scenarios
         self.load_md.get_forecast(load_forecast_df)
-        self.load_md.fit_conditional_gpd(
-            'load', bin_width_ratio=0.1, min_sample_size=400)
+        # self.load_md.fit_conditional_gpd(
+        #     'load', bin_width_ratio=0.1, min_sample_size=400)
 
         A = (np.eye(self.load_md.num_of_horizons)
              - np.outer(self.load_md.horizon_cov.values @ eh, eh)
@@ -510,7 +519,7 @@ class PCAGeminiModel(GeminiModel):
         self.marginal_ecdfs = dict()
 
     def pca_transform(
-            self, num_of_components: Union[int, float, str] = 0.99) -> None:
+            self, num_of_components: Union[int, float, str] = 0.9) -> None:
         """Reduce number of dimensions by applying a PCA transformation.
 
         Args
@@ -519,7 +528,7 @@ class PCAGeminiModel(GeminiModel):
                                 Can take any value accepted by
                                 `sklearn.decomposition.PCA`. The default value
                                 corresponds to selecting the number of
-                                dimensions such that they explain at least 99%
+                                dimensions such that they explain at least 90%
                                 of the variance in the original data.
         """
 
@@ -600,7 +609,7 @@ class PCAGeminiModel(GeminiModel):
             index=pca_comp_indx, columns=pca_comp_indx
             )
 
-    def fit_conditional_marginal_dist(self,
+    def fit_solar_conditional_marginal_dist(self,
                                       sunrise_timesteps: dict,
                                       sunset_timesteps: dict,
                                       hist_sun_info: dict,
@@ -712,7 +721,7 @@ class PCAGeminiModel(GeminiModel):
             self.scen_timesteps, level=1)
 
         # Fit conditional marginal distributions
-        self.fit_conditional_marginal_dist(trans_timesteps['sunrise'],
+        self.fit_solar_conditional_marginal_dist(trans_timesteps['sunrise'],
                                            trans_timesteps['sunset'],
                                            hist_sun_info)
 

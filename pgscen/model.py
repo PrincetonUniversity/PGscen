@@ -9,7 +9,7 @@ from scipy.stats import norm
 from typing import List, Dict, Tuple, Iterable, Optional
 
 from pgscen.utils.r_utils import (qdist, gaussianize, graphical_lasso, gemini,
-                                  fit_dist, standardize)
+                                  PGscenECDF, standardize)
 
 
 def get_asset_list(hist_actual_df : pd.DataFrame,
@@ -100,7 +100,7 @@ class GeminiModel:
         forecasts : Optional[Dict[pd.Series]]
             The forecasted values for the scenario time window which were used
             as a basis to generate scenarios.
-        conditional_gpd_dict : Optional[Dict[pd.Timestamp,
+        marginal_ecdfs : Optional[Dict[pd.Timestamp,
                                         rpy2.SignatureTranslatedFunction]
             Parameters of the Gaussian distributions used to fit a scenario
             generation model conditional on similar forecast values.
@@ -118,7 +118,8 @@ class GeminiModel:
                  dev_index: Optional[Iterable[pd.Timestamp]] = None,
                  forecast_resolution_in_minute: int = 60,
                  num_of_horizons: int = 24,
-                 forecast_lead_time_in_hour: int = 12) -> None:
+                 forecast_lead_time_in_hour: int = 12,
+                 use_gpd: bool = False) -> None:
         """
         GeminiModel classes can be instantiated by either giving a pair of
         dataframes with actual and forecasted historical values in a dictionary
@@ -246,7 +247,7 @@ class GeminiModel:
                     self.hist_dev_df.index.isin(dev_index)]
 
             # normalize historical deviations using Gaussian distribution
-            gpd_dict, gauss_df = gaussianize(self.hist_dev_df)
+            gpd_dict, gauss_df = gaussianize(self.hist_dev_df, gpd=use_gpd)
             self.gpd_dict = {
                 (asset, timestep): gpd_dict[asset, horizon]
                 for asset in self.asset_list
@@ -271,7 +272,7 @@ class GeminiModel:
         self.scen_gauss_df = None
         self.scen_deviation_df = None
         self.forecasts = None
-        self.conditional_gpd_dict = None
+        self.marginal_ecdfs = None
         self.scen_df = None
 
     def fit(self, asset_rho: float, horizon_rho: float) -> None:
@@ -337,20 +338,17 @@ class GeminiModel:
 
         self.forecasts = use_forecasts.unstack()
 
-    def fit_conditional_gpd(self,
-                            asset_type: str, bin_width_ratio: float = 0.05,
-                            min_sample_size: int = 200,
-                            positive_actual: bool = False) -> None:
+    def fit_conditional_marginal_dist(self,
+                            bin_width_ratio: float = 0.05,
+                            min_sample_size: int = 200) -> None:
         """
-        This function fits a conditional GPD using the historical deviations
-        for time points whose forecasted values are similar to the forecasted
-        values for the time point at which scenarios are to be generated.
+        This function fits a conditional marginal distribution using the historical 
+        deviations for time points whose forecasted values are similar to the forecasted
+        values for the time point at which scenarios are to be generated. 
+        Useful for wind and solar scenarios.
 
         Arguments
         ---------
-        asset_type
-            The type of asset for which models are being fitted. Must be one of
-            "load", "solar", or "wind".
         bin_width_ratio
             The range of historical values which will be considered "similar"
             to the current forecast value, expressed as a proportion of the
@@ -360,18 +358,12 @@ class GeminiModel:
             criterion described above does not meet this threshold, we will
             append the closest historical values outside of the bin to
             satisfy it.
-        positive_actual
-            Whether to only consider time points with strictly positive actual
-            values, useful especially for solar models with many zero values
-            which can cause problems for the model.
+
 
         """
-        self.conditional_gpd_dict = {}
+        self.marginal_ecdfs = {}
         for asset in self.asset_list:
             asset_df = self.deviation_dict[asset]
-
-            if positive_actual:
-                asset_df = asset_df[asset_df['Actual'] > 0.]
 
             # find the range of historical forecasts
             fcst_min = asset_df['Forecast'].min()
@@ -380,69 +372,25 @@ class GeminiModel:
             for timestep in self.scen_timesteps:
                 fcst = self.forecasts[asset, timestep]
 
-                if asset_type == 'load' or asset_type == 'wind':
-                    lower = max(fcst_min,
-                                fcst - bin_width_ratio * (fcst_max - fcst_min))
-                    upper = min(fcst_max,
-                                fcst + bin_width_ratio * (fcst_max - fcst_min))
+                lower = max(fcst_min,
+                            fcst - bin_width_ratio * (fcst_max - fcst_min))
+                upper = min(fcst_max,
+                            fcst + bin_width_ratio * (fcst_max - fcst_min))
 
-                    selected_df = asset_df[(asset_df['Forecast'] >= lower)
-                                           & (asset_df['Forecast'] <= upper)]
+                selected_df = asset_df[(asset_df['Forecast'] >= lower)
+                                        & (asset_df['Forecast'] <= upper)]
+                data = np.ascontiguousarray(
+                    selected_df['Deviation'].values)
+
+                if len(data) < min_sample_size:
+                    idx = (asset_df.sort_values(
+                        'Forecast') - fcst).abs().sort_values(
+                        'Forecast').index[0:min_sample_size]
                     data = np.ascontiguousarray(
-                        selected_df['Deviation'].values)
-
-                    if len(data) < min_sample_size:
-                        idx = (asset_df.sort_values(
-                            'Forecast') - fcst).abs().sort_values(
-                            'Forecast').index[0:min_sample_size]
-                        data = np.ascontiguousarray(
-                            asset_df.loc[idx, 'Deviation'].values)
-
-                elif asset_type == 'solar':
-                    # hist_dev_data = get_ecdf_data(
-                    #     self.gpd_dict[asset, timestep])
-
-                    hist_dev_data = self.gpd_dict[asset, timestep].data
-                    hist_dev_range = np.max(
-                        hist_dev_data) - np.min(hist_dev_data)
-
-                    # if the forecasted value is too small, use all historical
-                    # deviations
-                    if (fcst <= 0.15 * fcst_max
-                            and hist_dev_range <= 0.15 * fcst_max):
-                        data = np.ascontiguousarray(hist_dev_data)
-
-                    # otherwise take the usual forecast +/- 5% of range bin
-                    else:
-                        lower = max(fcst_min, fcst - bin_width_ratio * (
-                                    fcst_max - fcst_min))
-                        upper = min(fcst_max, fcst + bin_width_ratio * (
-                                    fcst_max - fcst_min))
-
-                        selected_df = asset_df[(asset_df['Forecast'] >= lower)
-                                               & (asset_df['Forecast']
-                                                  <= upper)]
-
-                        data = np.ascontiguousarray(
-                            selected_df['Deviation'].values)
-
-                        # if binning data on forecast has insufficient samples,
-                        # use the nearest data points as samples
-                        if len(data) < min_sample_size:
-                            idx = (asset_df.sort_values(
-                                'Forecast') - fcst).abs().sort_values(
-                                'Forecast').index[0:min_sample_size]
-                            data = np.ascontiguousarray(
-                                asset_df.loc[idx, 'Deviation'].values)
-
-                else:
-                    raise RuntimeError(f'Unrecognizable asset_type '
-                                       f'{asset_type}, must be one of load, '
-                                       f'solar or wind')
+                        asset_df.loc[idx, 'Deviation'].values)
 
                 try:
-                    self.conditional_gpd_dict[asset, timestep] = fit_dist(data)
-
+                    self.marginal_ecdfs[asset, timestep] = PGscenECDF(data)
                 except:
                     raise RuntimeError(
                         f'Debugging: unable to fit gpd for {asset} {timestep}')
@@ -512,9 +460,9 @@ class GeminiModel:
             scen_means, scen_vars = scen_df.mean(), scen_df.std()
             u_mat = norm.cdf(((scen_df - scen_means) / scen_vars).fillna(0.0))
 
-            if self.conditional_gpd_dict:
+            if self.marginal_ecdfs:
                 scen_df = pd.DataFrame({
-                    col: qdist(self.conditional_gpd_dict[col], u_mat[:, i])
+                    col: qdist(self.marginal_ecdfs[col], u_mat[:, i])
                     for i, col in enumerate(scen_df.columns)
                     })
             else:

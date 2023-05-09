@@ -1,17 +1,11 @@
 """Utilities specific to photovoltaic generator scenarios."""
 
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+import pytz
 from astral import LocationInfo
-from astral.sun import sun
+from astral.sun import sunrise, sunset
 from typing import Tuple
-
-
-def overlap(a: Tuple[pd.Timestamp, pd.Timestamp],
-            b: Tuple[pd.Timestamp, pd.Timestamp]) -> bool:
-    """Determine whether two time intervals overlap."""
-    return a[0] <= b[1] and b[0] <= a[1]
-
 
 def get_asset_transition_hour_info(
         loc: LocationInfo, date: datetime.date,
@@ -19,7 +13,19 @@ def get_asset_transition_hour_info(
         ) -> dict:
     """Get asset sunrise and sunset horizon and fraction."""
 
-    sun_info = sun(loc.observer, date=date)
+    # calculate sun related info in local time, then convert into utc
+    sun_rise = sunrise(loc.observer, date = date,
+         tzinfo = pytz.timezone(loc.timezone)).astimezone(timezone.utc)
+
+    sun_set = sunset(loc.observer, date = date,
+         tzinfo=pytz.timezone(loc.timezone)).astimezone(timezone.utc)
+
+    if sun_set < sun_rise:
+        sun_set = sunset(loc.observer, date = (date + timedelta(days=1)).date(),
+         tzinfo=pytz.timezone(loc.timezone)).astimezone(timezone.utc)
+
+    sun_info = {'sunrise': sun_rise, 'sunset': sun_set}
+
     sunrise_delay_time = pd.Timedelta(sunrise_delay_in_minutes, unit='min')
     sunset_delay_time = pd.Timedelta(sunset_delay_in_minutes, unit='min')
 
