@@ -40,11 +40,14 @@ setuptools.setup(
             ],
         },
 
-    install_requires=['numpy', 'matplotlib', 'pandas', 'scipy'],
+    install_requires=['numpy', 'matplotlib', 'pandas', 'scipy',
+                      'dill', 'statsmodels', 'cffi', 'jupyterlab',
+                      'seaborn', 'openpyxl', 'rpy2', 'geopandas',
+                      'scikit-learn', 'ipywidgets', 'astral'],
     )
 
 
-os.system("curl https://carmona.princeton.edu/SVbook/Rsafd.zip "
+os.system("curl -L https://carmona.princeton.edu/SVbook/Rsafd.zip "
           "--output Rsafd.zip")
 os.system("unzip Rsafd.zip")
 os.system('R -e "install.packages(\'Rsafd\', repos = NULL, type=\'source\')"')

@@ -3,23 +3,9 @@ channels:
   - conda-forge
 dependencies:
   - python=3.8
-  - pip
-  - numpy
-  - scipy
-  - pandas
-  - dill
-  - matplotlib
-  - statsmodels
-  - cffi
-  - jupyterlab
-  - seaborn
-  - openpyxl
-  - rpy2
-  - geopandas
-  - ipywidgets
-  - r-essentials=4.0
-  - r-glasso
+  - r-essentials=4.2
   - r-qgraph
+  - r-glasso
   - r-envstats
   - r-robustbase
   - r-rgl
@@ -29,5 +15,3 @@ dependencies:
   - r-scatterplot3d
   - r-tseries
   - r-plot3d
-  - pip:
-    - astral
