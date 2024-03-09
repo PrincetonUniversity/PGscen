@@ -19,8 +19,10 @@ setuptools.setup(
     package_data={'pgscen': ['../test/resources/*.p.gz',
                              '../data/*/*/*/*.csv',
                              '../data/*/*/*/*/*.csv',
-                             '../data/MetaData/*.xlsx',
-                             '../data/MetaData/*.zip']},
+                             '../data/*/*/*.xlsx',
+                             '../data/*/*/*.zip',
+                             '../data/*/*/*.csv',
+                             '../data/Map/*.zip']},
 
     entry_points={
         'console_scripts': [
