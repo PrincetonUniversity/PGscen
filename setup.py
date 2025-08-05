@@ -42,18 +42,19 @@ setuptools.setup(
             ],
         },
 
-    install_requires=['numpy', 'matplotlib', 'pandas', 'scipy',
+# Move more installation requirements to env file, identify versions.
+
+    install_requires=['numpy', 'matplotlib', 'scipy',
                       'dill', 'statsmodels', 'cffi', 'jupyterlab',
-                      'seaborn', 'openpyxl', 'rpy2', 'geopandas',
+                      'seaborn', 'openpyxl', 'geopandas',
                       'scikit-learn', 'ipywidgets', 'astral'],
     )
 
+# Manual installation of Rsafd dependencies.
 
-os.system("curl -L https://carmona.princeton.edu/SVbook/Rsafd.zip "
-          "--output Rsafd.zip")
+os.system('PKG_CPPFLAGS="-DHAVE_WORKING_LOG1P" Rscript -e "install.packages(c(\'timeDate\', \'quadprog\', \'quantreg\', \'plot3D\', \'robustbase\', \'scatterplot3d\', \'splines\', \'tseries\', \'glasso\', \'qgraph\', \'reticulate\', \'keras\', \'rgl\', \'glmnet\'), repos=\'https://cran.rstudio.com\')"')
 os.system("unzip Rsafd.zip")
 os.system('R -e "install.packages(\'Rsafd\', repos = NULL, type=\'source\')"')
-os.system("rm -rf Rsafd Rsafd.zip")
 
 # hacky way tp get around flawed TclTk installs on MacOS
 tcltk_path = Path(sys.exec_prefix,
