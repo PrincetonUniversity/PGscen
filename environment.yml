@@ -12,6 +12,7 @@ dependencies:
   - r-scatterplot3d
   - r-tseries
   - r-plot3d
+  - networkx
   - libgfortran5
   - pandas==1.5.3
   - rpy2==3.5.11
