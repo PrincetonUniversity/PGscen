@@ -12,6 +12,7 @@ dependencies:
   - r-scatterplot3d
   - r-tseries
   - r-plot3d
+  - fiona==1.9.0
   - networkx
   - libgfortran5
   - pandas==1.5.3
