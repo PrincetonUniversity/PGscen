@@ -4,11 +4,8 @@ channels:
 dependencies:
   - python=3.8
   - r-essentials=4.2
-  - r-qgraph
-  - r-glasso
   - r-envstats
   - r-robustbase
-  - r-rgl
   - r-quantreg
   - r-mvtnorm
   - r-quadprog
@@ -16,3 +13,8 @@ dependencies:
   - r-tseries
   - r-plot3d
   - fiona==1.9.0
+  - networkx
+  - libgfortran5
+  - pandas==1.5.3
+  - rpy2==3.5.11
+
