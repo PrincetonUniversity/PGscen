@@ -9,25 +9,25 @@ Please see the Jupyter notebooks available in the `examples/` directory for an o
 
 For a publication list, you can use this software citation.
 
-> Xinshuo Yang, Michal Grzadkowski, and René Carmona. *PGscen*. GitHub repository, 2021. [PrincetonUniversity/PGscen](https://github.com/PrincetonUniversity/PGscen)
+> Xinshuo Yang, Michal Grzadkowski, René Carmona, and Michael Bino. *PGscen*. GitHub repository, 2026. [Commit `e1ac6bd`](https://github.com/PrincetonUniversity/PGscen/tree/e1ac6bddb3c2b0f51f58d111d4142919a1f22913)
 
 For LaTeX, add this BibTeX entry to your `.bib` file.
 
 ```bibtex
 @misc{pgscen,
-  author       = {Yang, Xinshuo and Grzadkowski, Michal and Carmona, Ren{\'e}},
+  author       = {Yang, Xinshuo and Grzadkowski, Michal and Carmona, Ren{\'e} and Bino, Michael},
   title        = {{PGscen}},
-  year         = {2021},
-  howpublished = {GitHub repository, \url{https://github.com/PrincetonUniversity/PGscen}}
+  year         = {2026},
+  howpublished = {GitHub repository,
+                  \url{https://github.com/PrincetonUniversity/PGscen/tree/e1ac6bddb3c2b0f51f58d111d4142919a1f22913}}
 }
 ```
 
 Load `\usepackage{url}` in your preamble if your template does not already
 provide `\url`, then cite the software with `\cite{pgscen}`.
 
-The example uses the year of the first public release. If you used a specific
-release or commit, use its year and permalink in the entry. For the scenario
-generation method, cite Carmona and Yang's
+If you used a different release or commit, use its year and permalink in the
+entry. For the scenario generation method, cite Carmona and Yang's
 [*Joint Granular Model for Load, Solar and Wind Power Scenario Generation*](https://doi.org/10.1109/TSTE.2023.3325202).
 
 ## License Notice
