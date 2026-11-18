@@ -8,6 +8,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Check release smoke test code
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -r test/requirements-checks.txt
+          .venv/bin/ruff --isolated check setup.py test/test_console_scripts.py
+          .venv/bin/ruff --isolated format --check test/test_console_scripts.py
+          .venv/bin/mypy --strict test/test_console_scripts.py
+
   docker-tests:
     runs-on: ubuntu-latest
 

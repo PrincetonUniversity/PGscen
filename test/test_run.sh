@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 
-# Exit immediately if a command exits with a non-zero status.
-set -e
+set -euo pipefail
 
 REPODIR=$( dirname "$0" )
 OUTDIR=$REPODIR/temp
+
+python -m unittest discover -s "$REPODIR" -p 'test_console_scripts.py' -v
 
 # Clean up and create output directory
 rm -rf $OUTDIR

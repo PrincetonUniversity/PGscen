@@ -1,13 +1,12 @@
-#!/usr/bin/env python
 import os
 import sys
-import setuptools
 from pathlib import Path
 
+import setuptools
 
 setuptools.setup(
     name='pgscen',
-    version='0.2.1-a2',
+    version='0.3.0',
     description="power grid scenario creation platform for "
                 "load and production of wind and solar",
 
@@ -30,8 +29,7 @@ setuptools.setup(
             'pgscen-load=pgscen.command_line:create_load_scenarios',
             'pgscen-wind=pgscen.command_line:create_wind_scenarios',
             'pgscen-solar=pgscen.command_line:create_solar_scenarios',
-            'pgscen-load-solar'
-            '=pgscen.command_line:create_load_solar_scenarios',
+            'pgscen-load-solar=pgscen.command_line:create_load_solar_scenarios',
             'pgscen=pgscen.command_line:create_scenarios',
 
             'pgscen-ny-load=pgscen.command_line:create_ny_load_scenarios',
