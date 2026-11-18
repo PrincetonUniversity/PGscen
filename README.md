@@ -5,6 +5,31 @@
 This package generates power grid scenarios using GEMINI trained on historical grid asset actual and forecasted values.
 Please see the Jupyter notebooks available in the `examples/` directory for an overview of how PGscen works.
 
+## Citing PGscen
+
+For a publication list, you can use this software citation.
+
+> Xinshuo Yang, Michal Grzadkowski, and René Carmona. *PGscen*. GitHub repository, 2021. [PrincetonUniversity/PGscen](https://github.com/PrincetonUniversity/PGscen)
+
+For LaTeX, add this BibTeX entry to your `.bib` file.
+
+```bibtex
+@misc{pgscen,
+  author       = {Yang, Xinshuo and Grzadkowski, Michal and Carmona, Ren{\'e}},
+  title        = {{PGscen}},
+  year         = {2021},
+  howpublished = {GitHub repository, \url{https://github.com/PrincetonUniversity/PGscen}}
+}
+```
+
+Load `\usepackage{url}` in your preamble if your template does not already
+provide `\url`, then cite the software with `\cite{pgscen}`.
+
+The example uses the year of the first public release. If you used a specific
+release or commit, use its year and permalink in the entry. For the scenario
+generation method, cite Carmona and Yang's
+[*Joint Granular Model for Load, Solar and Wind Power Scenario Generation*](https://doi.org/10.1109/TSTE.2023.3325202).
+
 ## License Notice
 
 This software is made available for academic and research purposes only under a license from Princeton University. Commercial use is prohibited without a separate license agreement.
